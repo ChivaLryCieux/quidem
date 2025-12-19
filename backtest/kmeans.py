@@ -11,7 +11,7 @@ import time
 # 1. 配置区域 (User Configuration)
 # ==========================================
 SYMBOL = 'XRP/USDT'  # 交易对
-TIMEFRAME = '1h'  # K线周期
+TIMEFRAME = '1h'  # K线周期, 主要分析15m和1h
 LIMIT = 10000  # 拉取K线数量
 WINDOWS = [5, 10, 25, 50]  # 特征窗口 T
 N_CLUSTERS = 5  # 聚类数量 K
@@ -70,7 +70,7 @@ def fetch_binance_data(symbol, timeframe, target_limit, warmup_buffer, proxies):
 
 
 # ==========================================
-# 3. 特征工程 (Feature Engineering) - 已修改
+# 3. 特征工程 (Feature Engineering)
 # ==========================================
 def calculate_features(df, windows):
     data = df.copy()
@@ -81,7 +81,6 @@ def calculate_features(df, windows):
     data['log_ret'] = np.log(data['close'] / data['close'].shift(1))
 
     for t in windows:
-        # --- 修改处 ---
         # 1. 对数动量 (Log Momentum): ln(P_t / P_(t-T))
         # 这等价于 ln(P_t) - ln(P_(t-T))，表示 T 周期内的连续复利收益率
         mom_col = f'log_mom_{t}'
@@ -152,7 +151,7 @@ def plot_results_custom(df, transition_probs, n_clusters):
     ax1.legend(loc='upper left', frameon=True, facecolor='black')
     ax1.grid(True, alpha=0.15)
 
-    # --- 图 2: 特征热力图 (注意：现在显示的是对数动量) ---
+    # --- 图 2: 特征热力图 ---
     ax2 = fig.add_subplot(gs[1, 0])
     feature_cols = df.columns[df.columns.str.contains('mom_|vol_')]
     cluster_means = df.groupby('cluster')[feature_cols].mean()

@@ -20,7 +20,7 @@ else:
 class DisplayManager:
     def log_startup(self, mode_name):
         print(f"{Fore.CYAN}=========================================")
-        print(f"   {Config.SYMBOL} 高频量化终端 (WebSocket) ")
+        print(f"   {Config.SYMBOL} 高频量化终端")
         print(f"========================================={Style.RESET_ALL}")
         print(f"{Fore.GREEN}>>> 模式: {mode_name}{Style.RESET_ALL}")
 

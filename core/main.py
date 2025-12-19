@@ -59,7 +59,7 @@ class QuantBot:
     def run(self):
         self.ui.log_startup(self.mode_name)
 
-        # 连接交易所 (启动 WS)
+        # 连接交易所，启动WS
         ok, msg = self.exchange.connect()
         if not ok:
             self.ui.log_msg(f"连接失败: {msg}", "error")

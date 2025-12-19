@@ -5,7 +5,7 @@ import pywt
 from scipy.stats import t as student_t
 
 # ==========================================
-# 数学与分析工具集
+# 数学与分析工具集：指标与特征
 # ==========================================
 class MathUtils:
     @staticmethod

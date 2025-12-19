@@ -39,7 +39,7 @@ def ensure_daily_dir():
     return path
 
 
-# === 新增：生成资金权益曲线大图 ===
+# === 生成资金权益曲线大图 ===
 def generate_equity_curve(trades, save_dir):
     """
     绘制基于时间的账户余额变化曲线
