@@ -4,14 +4,14 @@ from colorama import init, Fore, Style
 
 # 导入所有拆分后的模块
 from config import Config, ExchangeService
-from strategy import StrategyBrain
+from ml_classifier import StrategyBrain
 from risk_manager import RiskManager
 from ui import DisplayManager, KeyListener
 
 init(autoreset=True)
 
 # ==========================================
-# 7. 机器人主引擎 (Trading Bot Engine)
+# 机器人主引擎 (Trading Bot Engine)
 # ==========================================
 class QuantBot:
     def __init__(self):
@@ -94,25 +94,25 @@ class QuantBot:
 
         # 实时送入 Brain 进行计算 (即便是未收盘的K线也可以用来计算实时指标)
         self.brain.ingest_candle(curr_candle)
-        obi, spread_pct = self.brain.ob_analyzer.analyze(book)
 
         # 2. 持仓管理 (实时监控价格)
         if self.position['size'] != 0:
             self._manage_position(curr_price, funding_rate)
 
         # 3. 开仓逻辑
-        analysis = self.brain.analyze()
+        analysis = self.brain.analyze(book)
 
         # 只有当数据足够新，且不在CD中
         if analysis and not self.risk.is_in_cooldown():
             if self.position['size'] == 0:
-                self._attempt_entry(analysis, curr_price, obi, spread_pct, funding_rate)
+                self._attempt_entry(analysis, curr_price, funding_rate)
 
         # 4. UI更新
         unrealized_pnl = (curr_price - self.position['entry_price']) * self.position['size'] if self.position[
                                                                                                     'size'] != 0 else 0
-        self.ui.update_status(self.position['size'], self.brain.state, self.brain.color, obi, unrealized_pnl,
-                              curr_price, funding_rate)
+        self.ui.update_status(self.position['size'], self.brain.state, self.brain.color, 
+                             analysis.get('obi', 0.0) if analysis else 0.0, 
+                             unrealized_pnl, curr_price, funding_rate)
 
     def _manage_position(self, curr_price, funding_rate):
         pos = self.position
@@ -129,9 +129,9 @@ class QuantBot:
         if should_exit:
             self._execute_exit(reason, curr_price, funding_rate)
 
-    def _attempt_entry(self, data, price, obi, spread, funding_rate):
+    def _attempt_entry(self, data, price, funding_rate):
         # 将复杂的信号判断逻辑委托给 strategy 模块
-        sig, lev = self.brain.get_entry_signal(data, price, obi, spread)
+        sig, lev = self.brain.get_entry_signal(data, price)
         regime = self.brain.state
 
         # 如果收到有效信号 (sig != 0)，执行风控检查与下单
@@ -161,8 +161,9 @@ class QuantBot:
                     tp_mult = 3.0 if regime == "🚀 TREND" else 1.5
                     self.position['tp'] = price + max(data['atr'] * tp_mult, price * Config.MIN_TP_DISTANCE) * sig
 
-                    self.ui.log_entry(regime, self.brain.color, sig, lev, obi, price, self.position['sl'],
-                                      self.position['tp'], funding_rate)
+                    self.ui.log_entry(regime, self.brain.color, sig, lev, 
+                                     data.get('obi', 0.0), price, self.position['sl'],
+                                     self.position['tp'], funding_rate)
                     self.profit_flip_count, self.was_in_profit = 0, False
 
     def _execute_exit(self, reason, price, funding_rate):
@@ -194,7 +195,7 @@ class QuantBot:
         self.exchange.close()  # 关闭WS
         if self.position['size'] != 0:
             print("正在平仓并退出...")
-            self._execute_exit("手动退出", self.brain.last_price, 0.0)
+            self._execute_exit("手动退出", 0.0, 0.0)
         sys.exit(0)
 
 

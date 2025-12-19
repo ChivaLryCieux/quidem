@@ -9,7 +9,7 @@ from math_tools import MathUtils, HInfinityFilter1D, OnlineEGARCH, FractalAnalys
 
 
 # ==========================================
-# 4. 核心逻辑: 盘口分析、状态机与策略大脑
+# 1. 盘口分析器
 # ==========================================
 class OrderBookAnalyzer:
     def analyze(self, orderbook):
@@ -28,12 +28,14 @@ class OrderBookAnalyzer:
         return obi, spread_pct
 
 
-class StrategyBrain:
+# ==========================================
+# 2. 随机森林分类器 - 负责机器学习功能
+# ==========================================
+class RandomForestClassifier:
     def __init__(self):
         self.hf = HInfinityFilter1D(gamma=0.03)
         self.egarch, self.bocpd, self.fractal, self.wavelet = OnlineEGARCH(), OnlineBOCPD(), FractalAnalysis(), WaveletAnalyzer()
         self.momentum_calc = MomentumCalculator()
-        self.ob_analyzer = OrderBookAnalyzer()
         self.rf_model = compose.Pipeline(
             preprocessing.StandardScaler(),
             AdaptiveRandomForestClassifier(n_models=10, seed=42)
@@ -41,7 +43,6 @@ class StrategyBrain:
         self.prev_features = None
         self.history = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         self.last_price = 0.0
-        self.state, self.color = "INIT", Fore.WHITE
 
     def ingest_candle(self, item):
         # item 格式: [timestamp, open, high, low, close, volume]
@@ -59,22 +60,7 @@ class StrategyBrain:
 
         self.history = self.history.iloc[-100:]  # 保持滑动窗口
 
-    def determine_regime(self, range_pct, vol_expl, hurst, cp_prob):
-        prev = self.state
-        if range_pct < 0.0015:
-            self.state, self.color = "💤 NOISE", Fore.WHITE
-        elif vol_expl > 1.5 or (vol_expl > 1.05 and cp_prob > 0.25):
-            self.state, self.color = "💥 BREAKOUT", Fore.MAGENTA
-        elif hurst > 0.55:
-            if prev == "🚀 TREND" and cp_prob > 0.5:
-                self.state, self.color = "🦀 RANGE", Fore.YELLOW
-            else:
-                self.state, self.color = "🚀 TREND", Fore.CYAN
-        else:
-            self.state, self.color = "🦀 RANGE", Fore.YELLOW
-        return self.state, self.color
-
-    def analyze(self):
+    def extract_features(self):
         df = self.history
         if len(df) < 30: return None
         curr_price = df['close'].iloc[-1]
@@ -122,35 +108,65 @@ class StrategyBrain:
             mom_50
         ]).reshape(1, -1)
 
-        self.determine_regime(range_pct, vol_expl, hurst, cp_prob)
-
         return {
             'features': features, 'price': curr_price, 'atr': atr, 'rsi': rsi,
             'vol_explosion': vol_expl, 'hurst': hurst, 'cp_prob': cp_prob,
             'hf_diff': hf_diff, 'wavelet_energy': wav_eng,
-            'mom_5': mom_5, 'mom_10': mom_10, 'mom_25': mom_25, 'mom_50': mom_50
+            'mom_5': mom_5, 'mom_10': mom_10, 'mom_25': mom_25, 'mom_50': mom_50,
+            'range_pct': range_pct
         }
 
-    def train_ai(self, features, label):
+    def train(self, features, label):
         curr_x = {f"f{i}": v for i, v in enumerate(features.flatten())}
         if self.prev_features:
             self.rf_model.learn_one(self.prev_features, label)
         self.prev_features = curr_x
 
-    def predict_ai(self, features):
+    def predict(self, features):
         x = {f"f{i}": v for i, v in enumerate(features.flatten())}
         probs = self.rf_model.predict_proba_one(x)
         if not probs: return 0, 0.0
         return (1, probs.get(1, 0.0)) if probs.get(1, 0.0) > probs.get(-1, 0.0) else (-1, probs.get(-1, 0.0))
 
-    def get_entry_signal(self, analysis_data, current_price, obi, spread_pct):
+
+# ==========================================
+# 3. 状态机 - 负责市场状态判断和交易信号生成
+# ==========================================
+class StateMachine:
+    def __init__(self):
+        self.state, self.color = "INIT", Fore.WHITE
+        self.ob_analyzer = OrderBookAnalyzer()
+
+    def determine_regime(self, range_pct, vol_expl, hurst, cp_prob):
+        prev = self.state
+        if range_pct < 0.0015:
+            self.state, self.color = "💤 NOISE", Fore.WHITE
+        elif vol_expl > 1.5 or (vol_expl > 1.05 and cp_prob > 0.25):
+            self.state, self.color = "💥 BREAKOUT", Fore.MAGENTA
+        elif hurst > 0.55:
+            if prev == "🚀 TREND" and cp_prob > 0.5:
+                self.state, self.color = "🦀 RANGE", Fore.YELLOW
+            else:
+                self.state, self.color = "🚀 TREND", Fore.CYAN
+        else:
+            self.state, self.color = "🦀 RANGE", Fore.YELLOW
+        return self.state, self.color
+
+    def get_entry_signal(self, analysis_data, current_price):
         """
         根据当前市场状态和指标计算交易信号
         返回: (signal, leverage)
         signal: 1 (Buy), -1 (Sell), 0 (None)
         """
+        # 获取订单簿分析（如果已计算则使用已有值，否则计算）
+        if 'obi' in analysis_data and 'spread_pct' in analysis_data:
+            obi = analysis_data['obi']
+            spread_pct = analysis_data['spread_pct']
+        else:
+            obi, spread_pct = self.ob_analyzer.analyze(analysis_data.get('orderbook', {}))
+        
         features = analysis_data['features']
-        ai_dir, ai_conf = self.predict_ai(features)
+        ai_dir, ai_conf = analysis_data['ai_prediction']
 
         sig = 0
         lev = Config.MIN_LEVERAGE
@@ -193,3 +209,51 @@ class StrategyBrain:
                 lev = Config.MAX_LEVERAGE
 
         return sig, lev
+
+
+# ==========================================
+# 4. 策略大脑 - 协调随机森林和状态机
+# ==========================================
+class StrategyBrain:
+    def __init__(self):
+        self.rf_classifier = RandomForestClassifier()
+        self.state_machine = StateMachine()
+        self.state = self.state_machine.state
+        self.color = self.state_machine.color
+
+    def ingest_candle(self, item):
+        self.rf_classifier.ingest_candle(item)
+
+    def analyze(self, orderbook=None):
+        # 提取特征
+        feature_data = self.rf_classifier.extract_features()
+        if not feature_data:
+            return None
+            
+        # 添加订单簿数据
+        feature_data['orderbook'] = orderbook
+        
+        # 分析订单簿获取OBI和spread_pct
+        obi, spread_pct = self.state_machine.ob_analyzer.analyze(orderbook)
+        feature_data['obi'] = obi
+        feature_data['spread_pct'] = spread_pct
+        
+        # 确定市场状态
+        self.state, self.color = self.state_machine.determine_regime(
+            feature_data['range_pct'], 
+            feature_data['vol_explosion'], 
+            feature_data['hurst'], 
+            feature_data['cp_prob']
+        )
+        
+        # AI预测
+        ai_dir, ai_conf = self.rf_classifier.predict(feature_data['features'])
+        feature_data['ai_prediction'] = (ai_dir, ai_conf)
+        
+        return feature_data
+
+    def train_ai(self, features, label):
+        self.rf_classifier.train(features, label)
+
+    def get_entry_signal(self, analysis_data, current_price):
+        return self.state_machine.get_entry_signal(analysis_data, current_price)
