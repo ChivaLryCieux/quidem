@@ -4,7 +4,7 @@ from colorama import init, Fore, Style
 
 # 导入所有拆分后的模块
 from config import Config, ExchangeService
-from ml_classifier import StrategyBrain
+from strategy import StrategyBrain
 from risk_manager import RiskManager
 from ui import DisplayManager, KeyListener
 
@@ -51,18 +51,25 @@ class QuantBot:
 
         # 预热: 使用 REST API 拉取历史数据
         self.ui.log_msg("正在获取历史数据预热模型...", "info")
-        initial_ohlcv = self.exchange.fetch_initial_history(limit=100)
+        initial_data = self.exchange.fetch_initial_history(limit=100)
+        initial_ohlcv_1m = initial_data['1m']
+        initial_ohlcv_15m = initial_data['15m']
 
-        if initial_ohlcv:
-            for candle in initial_ohlcv:
-                self.brain.ingest_candle(candle)
+        if initial_ohlcv_1m and initial_ohlcv_15m:
+            # 处理1分钟数据
+            for candle in initial_ohlcv_1m:
+                self.brain.ingest_candle(candle, '1m')
                 res = self.brain.analyze()
                 if res:
                     label = 1 if float(candle[4]) - float(candle[1]) > 0 else -1
                     self.brain.train_ai(res['features'], label)
 
+            # 处理15分钟数据
+            for candle in initial_ohlcv_15m:
+                self.brain.ingest_candle(candle, '15m')
+
             # 设置最近一根收盘K线的时间
-            self.last_candle_closed_time = initial_ohlcv[-2][0]
+            self.last_candle_closed_time = initial_ohlcv_1m[-2][0]
         else:
             self.ui.log_msg("预热数据获取失败", "error")
             self.exchange.close()
@@ -84,16 +91,20 @@ class QuantBot:
 
     def _tick(self):
         # 1. 从本地缓存获取最新数据 (非阻塞)
-        curr_candle, book, funding_rate = self.exchange.get_latest_data()
-        if not curr_candle: return
+        curr_candle_1m, curr_candle_15m, book, funding_rate = self.exchange.get_latest_data()
+        if not curr_candle_1m: return
 
-        # curr_candle 格式: [t, o, h, l, c, v]
+        # curr_candle_1m 格式: [t, o, h, l, c, v]
         # WebSocket 推送的是"当前正在进行"的K线。
-        curr_time = curr_candle[0]
-        curr_price = curr_candle[4]
+        curr_time = curr_candle_1m[0]
+        curr_price = curr_candle_1m[4]
 
         # 实时送入 Brain 进行计算 (即便是未收盘的K线也可以用来计算实时指标)
-        self.brain.ingest_candle(curr_candle)
+        self.brain.ingest_candle(curr_candle_1m, '1m')
+        
+        # 如果有15分钟数据，也送入Brain
+        if curr_candle_15m:
+            self.brain.ingest_candle(curr_candle_15m, '15m')
 
         # 2. 持仓管理 (实时监控价格)
         if self.position['size'] != 0:

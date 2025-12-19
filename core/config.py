@@ -60,12 +60,14 @@ class MarketDataStreamer(threading.Thread):
         super().__init__()
         self.daemon = True
         self.ws = None
-        self.url = f"wss://fstream.binance.com/stream?streams={Config.SYMBOL_WS}@kline_{Config.TIMEFRAME}/{Config.SYMBOL_WS}@depth20@100ms/{Config.SYMBOL_WS}@markPrice"
+        # 订阅1m和15m K线，以及深度和标记价格
+        self.url = f"wss://fstream.binance.com/stream?streams={Config.SYMBOL_WS}@kline_{Config.TIMEFRAME}/{Config.SYMBOL_WS}@kline_15m/{Config.SYMBOL_WS}@depth20@100ms/{Config.SYMBOL_WS}@markPrice"
 
         # 线程安全的数据存储
         self.lock = threading.Lock()
         self.data = {
-            'kline': None,  # 最新K线
+            'kline_1m': None,  # 1分钟K线
+            'kline_15m': None,  # 15分钟K线
             'orderbook': None,  # 深度
             'funding_rate': 0.0,  # 资金费率
             'is_ready': False
@@ -108,11 +110,11 @@ class MarketDataStreamer(threading.Thread):
             payload = msg.get('data')
 
             with self.lock:
-                # 1. K线数据处理
+                # 1. K线数据处理 - 区分1m和15m
                 if 'kline' in stream:
                     k = payload['k']
                     # 转换成标准格式: [timestamp, open, high, low, close, volume]
-                    self.data['kline'] = [
+                    kline_data = [
                         k['t'],  # Timestamp
                         float(k['o']),  # Open
                         float(k['h']),  # High
@@ -120,6 +122,12 @@ class MarketDataStreamer(threading.Thread):
                         float(k['c']),  # Close
                         float(k['v'])  # Volume
                     ]
+                    
+                    # 根据流名称区分存储
+                    if 'kline_1m' in stream:
+                        self.data['kline_1m'] = kline_data
+                    elif 'kline_15m' in stream:
+                        self.data['kline_15m'] = kline_data
 
                 # 2. 深度数据处理 (@depth20 推送的是全量快照，无需维护增量)
                 elif 'depth20' in stream:
@@ -133,7 +141,8 @@ class MarketDataStreamer(threading.Thread):
                     if 'r' in payload:
                         self.data['funding_rate'] = float(payload['r'])
 
-                if self.data['kline'] and self.data['orderbook']:
+                # 检查数据是否准备就绪
+                if self.data['kline_1m'] and self.data['orderbook']:
                     self.data['is_ready'] = True
 
         except Exception as e:
@@ -196,22 +205,26 @@ class ExchangeService:
     def fetch_initial_history(self, limit=100):
         """只在启动时调用一次 REST API 获取历史 K 线"""
         try:
-            ohlcv = self.client.fetch_ohlcv(self.symbol, Config.TIMEFRAME, limit=limit)
-            return ohlcv
+            # 获取1分钟K线历史数据
+            ohlcv_1m = self.client.fetch_ohlcv(self.symbol, Config.TIMEFRAME, limit=limit)
+            # 获取15分钟K线历史数据
+            ohlcv_15m = self.client.fetch_ohlcv(self.symbol, '15m', limit=limit)
+            return {'1m': ohlcv_1m, '15m': ohlcv_15m}
         except Exception as e:
             print(f"{Fore.RED}[History Fetch Error] {e}{Style.RESET_ALL}")
-            return []
+            return {'1m': [], '15m': []}
 
     def get_latest_data(self):
         """
         从 WebSocket 本地缓存读取数据
-        返回: (最新K线列表, 订单簿, 资金费率)
+        返回: (最新1m K线列表, 最新15m K线列表, 订单簿, 资金费率)
         """
         data = self.ws_streamer.get_latest()
-        current_candle = data['kline']
+        kline_1m = data['kline_1m']
+        kline_15m = data['kline_15m']
         book = data['orderbook']
         funding = data['funding_rate']
-        return current_candle, book, funding
+        return kline_1m, kline_15m, book, funding
 
     def get_precision_amount(self, amount, price):
         return float(self.client.amount_to_precision(self.symbol, amount))

@@ -34,6 +34,10 @@ class OrderBookAnalyzer:
 class RandomForestClassifier:
     def __init__(self):
         self.hf = HInfinityFilter1D(gamma=0.03)
+        # 添加两个额外的H无穷滤波器，分别用于1m和15m预测
+        self.hf_predictor_1m = HInfinityFilter1D(gamma=0.03)
+        self.hf_predictor_15m = HInfinityFilter1D(gamma=0.03)
+        
         self.egarch, self.bocpd, self.fractal, self.wavelet = OnlineEGARCH(), OnlineBOCPD(), FractalAnalysis(), WaveletAnalyzer()
         self.momentum_calc = MomentumCalculator()
         self.rf_model = compose.Pipeline(
@@ -42,23 +46,58 @@ class RandomForestClassifier:
         )
         self.prev_features = None
         self.history = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        self.history_15m = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         self.last_price = 0.0
+        self.price_prediction_diff = 0.0  # 存储15m预测与1m预测的差值
+        self.price_history_1m = []  # 存储1分钟价格历史，用于预测
+        self.price_history_15m = []  # 存储15分钟价格历史，用于预测
 
-    def ingest_candle(self, item):
+    def ingest_candle(self, item, timeframe='1m'):
         # item 格式: [timestamp, open, high, low, close, volume]
         row = pd.DataFrame([{'timestamp': item[0], 'open': float(item[1]), 'high': float(item[2]),
                              'low': float(item[3]), 'close': float(item[4]), 'volume': float(item[5])}])
-        if self.history.empty:
-            self.history = row
-        else:
-            # 如果时间戳相同，更新最后一行（WS推送实时变动）
-            if self.history.iloc[-1]['timestamp'] == item[0]:
-                self.history.iloc[-1] = row.iloc[0]
-            # 如果是新时间戳，追加
-            elif item[0] > self.history.iloc[-1]['timestamp']:
-                self.history = pd.concat([self.history, row], ignore_index=True)
+        curr_price = float(item[4])
+        
+        if timeframe == '1m':
+            if self.history.empty:
+                self.history = row
+            else:
+                # 如果时间戳相同，更新最后一行（WS推送实时变动）
+                if self.history.iloc[-1]['timestamp'] == item[0]:
+                    self.history.iloc[-1] = row.iloc[0]
+                # 如果是新时间戳，追加
+                elif item[0] > self.history.iloc[-1]['timestamp']:
+                    self.history = pd.concat([self.history, row], ignore_index=True)
 
-        self.history = self.history.iloc[-100:]  # 保持滑动窗口
+            self.history = self.history.iloc[-100:]  # 保持滑动窗口
+            
+            # 更新1分钟H无穷滤波器和价格历史
+            self.hf_predictor_1m.update(curr_price)
+            self.price_history_1m.append(curr_price)
+            if len(self.price_history_1m) > 100:  # 保持最近100个价格点
+                self.price_history_1m.pop(0)
+            
+        elif timeframe == '15m':
+            if self.history_15m.empty:
+                self.history_15m = row
+            else:
+                # 如果时间戳相同，更新最后一行（WS推送实时变动）
+                if self.history_15m.iloc[-1]['timestamp'] == item[0]:
+                    self.history_15m.iloc[-1] = row.iloc[0]
+                # 如果是新时间戳，追加
+                elif item[0] > self.history_15m.iloc[-1]['timestamp']:
+                    self.history_15m = pd.concat([self.history_15m, row], ignore_index=True)
+
+            self.history_15m = self.history_15m.iloc[-100:]  # 保持滑动窗口
+            
+            # 更新15分钟H无穷滤波器和价格历史
+            self.hf_predictor_15m.update(curr_price)
+            self.price_history_15m.append(curr_price)
+            if len(self.price_history_15m) > 100:  # 保持最近100个价格点
+                self.price_history_15m.pop(0)
+            
+            # 更新价格预测差值
+            self._update_price_prediction_diff()
 
     def extract_features(self):
         df = self.history
@@ -105,7 +144,8 @@ class RandomForestClassifier:
             mom_5,
             mom_10,
             mom_25,
-            mom_50
+            mom_50,
+            self.price_prediction_diff  # 添加价格预测差值作为新特征
         ]).reshape(1, -1)
 
         return {
@@ -113,8 +153,41 @@ class RandomForestClassifier:
             'vol_explosion': vol_expl, 'hurst': hurst, 'cp_prob': cp_prob,
             'hf_diff': hf_diff, 'wavelet_energy': wav_eng,
             'mom_5': mom_5, 'mom_10': mom_10, 'mom_25': mom_25, 'mom_50': mom_50,
-            'range_pct': range_pct
+            'range_pct': range_pct, 'price_prediction_diff': self.price_prediction_diff
         }
+
+    def _update_price_prediction_diff(self):
+        """更新15分钟预测与1分钟预测的差值"""
+        try:
+            # 获取当前滤波器输出作为基础预测
+            pred_15m_base = self.hf_predictor_15m.x
+            pred_1m_base = self.hf_predictor_1m.x
+            
+            # 如果价格历史不足，使用滤波器输出
+            if len(self.price_history_1m) < 2 or len(self.price_history_15m) < 2:
+                if pred_1m_base > 0:
+                    self.price_prediction_diff = (pred_15m_base - pred_1m_base) / pred_1m_base
+                else:
+                    self.price_prediction_diff = 0.0
+                return
+            
+            # 计算1分钟和15分钟的趋势
+            trend_1m = (self.price_history_1m[-1] - self.price_history_1m[-2]) / (self.price_history_1m[-2] + 1e-9)
+            trend_15m = (self.price_history_15m[-1] - self.price_history_15m[-2]) / (self.price_history_15m[-2] + 1e-9)
+            
+            # 预测15分钟后的价格（使用15分钟趋势，但转换为1分钟尺度）
+            pred_15m = pred_15m_base * (1 + trend_15m * 15)
+            
+            # 预测1分钟后的价格
+            pred_1m = pred_1m_base * (1 + trend_1m * 1)
+            
+            # 计算相对差值（百分比）
+            if pred_1m > 0:
+                self.price_prediction_diff = (pred_15m - pred_1m) / pred_1m
+            else:
+                self.price_prediction_diff = 0.0
+        except Exception as e:
+            self.price_prediction_diff = 0.0
 
     def train(self, features, label):
         curr_x = {f"f{i}": v for i, v in enumerate(features.flatten())}
@@ -167,6 +240,9 @@ class StateMachine:
         
         features = analysis_data['features']
         ai_dir, ai_conf = analysis_data['ai_prediction']
+        
+        # 获取价格预测差值
+        price_pred_diff = analysis_data.get('price_prediction_diff', 0.0)
 
         sig = 0
         lev = Config.MIN_LEVERAGE
@@ -178,33 +254,47 @@ class StateMachine:
         if analysis_data['atr'] < current_price * Config.MIN_ATR_PCT:
             return 0, lev
 
-        # 2. 策略核心逻辑
+        # 2. 基于价格预测差值的新交易条件
+        # 如果预测差值大于MIN_TP_DISTANCE，才考虑做多
+        if price_pred_diff > Config.MIN_TP_DISTANCE:
+            prediction_signal = 1  # 做多信号
+        # 如果预测差值小于-MIN_TP_DISTANCE，才考虑做空
+        elif price_pred_diff < -Config.MIN_TP_DISTANCE:
+            prediction_signal = -1  # 做空信号
+        else:
+            prediction_signal = 0  # 不交易
+
+        # 如果预测信号为0，直接返回不交易
+        if prediction_signal == 0:
+            return 0, lev
+
+        # 3. 策略核心逻辑
         if regime == "🦀 RANGE":
-            # 震荡策略: RSI 反转
-            if analysis_data['rsi'] > 70 and ai_dir != 1:
-                sig = -1
-            elif analysis_data['rsi'] < 30 and ai_dir != -1:
+            # 震荡策略: RSI 反转 + 预测信号确认
+            if prediction_signal == 1 and analysis_data['rsi'] < 30 and ai_dir != -1:
                 sig = 1
+            elif prediction_signal == -1 and analysis_data['rsi'] > 70 and ai_dir != 1:
+                sig = -1
             lev = 15  # 激进震荡杠杆
 
         elif regime == "🚀 TREND":
-            # 趋势策略: H-inf滤波 + AI方向 + OBI盘口
+            # 趋势策略: H-inf滤波 + AI方向 + OBI盘口 + 预测信号
             filt = 1 if analysis_data['hf_diff'] > 0 else -1
 
             # 顺势做多
-            if filt == 1 and ai_dir == 1 and obi >= Config.OBI_THRESHOLD_TREND:
+            if prediction_signal == 1 and filt == 1 and ai_dir == 1 and obi >= Config.OBI_THRESHOLD_TREND:
                 sig = 1
             # 顺势做空
-            elif filt == -1 and ai_dir == -1 and obi <= -Config.OBI_THRESHOLD_TREND:
+            elif prediction_signal == -1 and filt == -1 and ai_dir == -1 and obi <= -Config.OBI_THRESHOLD_TREND:
                 sig = -1
             lev = 20  # 趋势跟随杠杆
 
         elif regime == "💥 BREAKOUT":
-            # 突破策略: 高AI置信度 + OBI 确认
+            # 突破策略: 高AI置信度 + OBI 确认 + 预测信号
             if ai_conf > 0.5:
-                if obi > Config.OBI_THRESHOLD_BREAKOUT:
+                if prediction_signal == 1 and obi > Config.OBI_THRESHOLD_BREAKOUT:
                     sig = 1
-                elif obi < -Config.OBI_THRESHOLD_BREAKOUT:
+                elif prediction_signal == -1 and obi < -Config.OBI_THRESHOLD_BREAKOUT:
                     sig = -1
                 lev = Config.MAX_LEVERAGE
 
@@ -221,8 +311,8 @@ class StrategyBrain:
         self.state = self.state_machine.state
         self.color = self.state_machine.color
 
-    def ingest_candle(self, item):
-        self.rf_classifier.ingest_candle(item)
+    def ingest_candle(self, item, timeframe='1m'):
+        self.rf_classifier.ingest_candle(item, timeframe)
 
     def analyze(self, orderbook=None):
         # 提取特征
