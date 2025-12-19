@@ -118,3 +118,42 @@ class WaveletAnalyzer:
         denoised_coeffs = [(cA, pywt.threshold(cD, value=threshold, mode='soft')) for cA, cD in coeffs]
         denoised_series = pywt.iswt(denoised_coeffs, self.wavelet)[:len(data)]
         return denoised_series[-1], high_freq_coeffs[valid_idx] ** 2
+
+
+class MomentumCalculator:
+    def __init__(self, periods=[5, 10, 25, 50]):
+        self.periods = periods
+        self.price_history = []
+
+    def update(self, price):
+        self.price_history.append(price)
+        max_period = max(self.periods)
+        if len(self.price_history) > max_period:
+            self.price_history.pop(0)
+        
+        momentum_values = {}
+        current_price = price
+        
+        for T in self.periods:
+            if len(self.price_history) >= T + 1:
+                price_T_periods_ago = self.price_history[-(T + 1)]
+                momentum = current_price / price_T_periods_ago
+                # 取对数输出
+                momentum_values[f"T_{T}"] = np.log(momentum)
+            else:
+                momentum_values[f"T_{T}"] = None
+        
+        return momentum_values
+
+    def get_momentum(self, prices, T):
+        if len(prices) <= T:
+            return None
+        momentum = prices[-1] / prices[-(T + 1)]
+        # 取对数输出
+        return np.log(momentum)
+    
+    def calculate_all_momentums(self, prices):
+        results = {}
+        for T in self.periods:
+            results[f"T_{T}"] = self.get_momentum(prices, T)
+        return results

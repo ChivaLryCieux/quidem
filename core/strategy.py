@@ -5,7 +5,7 @@ from river.forest import ARFClassifier as AdaptiveRandomForestClassifier
 from colorama import Fore
 
 from config import Config
-from math_tools import MathUtils, HInfinityFilter1D, OnlineEGARCH, FractalAnalysis, OnlineBOCPD, WaveletAnalyzer
+from math_tools import MathUtils, HInfinityFilter1D, OnlineEGARCH, FractalAnalysis, OnlineBOCPD, WaveletAnalyzer, MomentumCalculator
 
 
 # ==========================================
@@ -32,6 +32,7 @@ class StrategyBrain:
     def __init__(self):
         self.hf = HInfinityFilter1D(gamma=0.03)
         self.egarch, self.bocpd, self.fractal, self.wavelet = OnlineEGARCH(), OnlineBOCPD(), FractalAnalysis(), WaveletAnalyzer()
+        self.momentum_calc = MomentumCalculator()
         self.ob_analyzer = OrderBookAnalyzer()
         self.rf_model = compose.Pipeline(
             preprocessing.StandardScaler(),
@@ -97,6 +98,13 @@ class StrategyBrain:
         range_pct = (df['high'].iloc[-1] - df['low'].iloc[-1]) / df['open'].iloc[-1]
 
         hf_diff = (curr_price - hf_val) / hf_val
+        
+        # 计算四个时间段的动量
+        momentums = self.momentum_calc.update(curr_price)
+        mom_5 = momentums.get('T_5', 0.0) if momentums.get('T_5') is not None else 0.0
+        mom_10 = momentums.get('T_10', 0.0) if momentums.get('T_10') is not None else 0.0
+        mom_25 = momentums.get('T_25', 0.0) if momentums.get('T_25') is not None else 0.0
+        mom_50 = momentums.get('T_50', 0.0) if momentums.get('T_50') is not None else 0.0
 
         features = np.array([
             hf_diff,
@@ -107,7 +115,11 @@ class StrategyBrain:
             vol_expl,
             range_pct,
             (curr_price - wav_res) / curr_price * 100,
-            np.log1p(wav_eng)
+            np.log1p(wav_eng),
+            mom_5,
+            mom_10,
+            mom_25,
+            mom_50
         ]).reshape(1, -1)
 
         self.determine_regime(range_pct, vol_expl, hurst, cp_prob)
@@ -115,7 +127,8 @@ class StrategyBrain:
         return {
             'features': features, 'price': curr_price, 'atr': atr, 'rsi': rsi,
             'vol_explosion': vol_expl, 'hurst': hurst, 'cp_prob': cp_prob,
-            'hf_diff': hf_diff, 'wavelet_energy': wav_eng
+            'hf_diff': hf_diff, 'wavelet_energy': wav_eng,
+            'mom_5': mom_5, 'mom_10': mom_10, 'mom_25': mom_25, 'mom_50': mom_50
         }
 
     def train_ai(self, features, label):
