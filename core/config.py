@@ -44,6 +44,9 @@ class Config:
     OBI_THRESHOLD_BREAKOUT = 0.1
     MAX_SPREAD_PCT = 0.001
 
+    #邮件报告开关
+    ENABLE_MAIL_REPORT =False
+
     @staticmethod
     def setup_proxy():
         # 如果需要设置系统级代理环境变量

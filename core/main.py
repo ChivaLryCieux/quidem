@@ -1,5 +1,7 @@
 import sys
 import time
+import redis
+import json
 from colorama import init, Fore, Style
 
 # 导入所有拆分后的模块
@@ -30,6 +32,21 @@ class QuantBot:
         self.exchange = ExchangeService(self.is_live)
         self.brain = StrategyBrain()
         self.risk = RiskManager()
+
+        #初始化邮件转发功能
+        self.redis_client = None
+        self.trade_snapshots = []  # 用于记录资金曲线
+        self.last_snapshot_time = 0
+
+        if Config.ENABLE_MAIL_REPORT:
+            try:
+                # 尝试连接 Redis
+                self.redis_client = redis.Redis(host='localhost', port=6379, db=0)
+                self.redis_client.ping()  # 测试连接
+                print(f"{Fore.GREEN}邮件服务已连接 {Style.RESET_ALL}")
+            except Exception as e:
+                print(f"{Fore.RED}邮件服务连接失败 {e}{Style.RESET_ALL}")
+                self.redis_client = None
 
         # 交易状态
         self.balance = 100.0
@@ -105,6 +122,20 @@ class QuantBot:
         # 如果有15分钟数据，也送入Brain
         if curr_candle_15m:
             self.brain.ingest_candle(curr_candle_15m, '15m')
+
+        # 记录交易快照 (用于邮件画微型走势图)
+        if Config.ENABLE_MAIL_REPORT and self.position['size'] != 0:
+            now = time.time()
+            if now - self.last_snapshot_time >= 15:
+                pnl = (curr_price - self.position['entry_price']) * self.position['size']
+
+                self.trade_snapshots.append({
+                    "time": now,
+                    "price": curr_price,
+                    "pnl": pnl,
+                    "regime": self.brain.state
+                })
+                self.last_snapshot_time = now
 
         # 2. 持仓管理 (实时监控价格)
         if self.position['size'] != 0:
@@ -193,6 +224,32 @@ class QuantBot:
             cd_hrs, cd_msg = self.risk.activate_circuit_breaker(net_pnl, margin_used)
 
             self.ui.log_exit(reason, price, net_pnl, fee, self.balance, cd_msg)
+
+            #发送邮件报告数据
+            if Config.ENABLE_MAIL_REPORT and self.redis_client:
+                try:
+                    trade_record = {
+                        "entry_time": self.position['entry_time'],
+                        "exit_time": int(time.time() * 1000),
+                        "mode": self.mode_name,
+                        "action": "做多" if pos_size > 0 else "做空",
+                        "entry_price": entry,
+                        "exit_price": price,
+                        "amount": abs(pos_size),
+                        "leverage": Config.MAX_LEVERAGE,
+                        "pnl": net_pnl,
+                        "fee": fee,
+                        "balance": self.balance,
+                        "regime": self.brain.state,
+                        "reason": reason,
+                        "snapshots": self.trade_snapshots
+                    }
+                    self.redis_client.rpush('trade_journal_pending', json.dumps(trade_record))
+                except Exception as e:
+                    print(f"{Fore.RED}[邮件发送失败] Redis 错误: {e}{Style.RESET_ALL}")
+            self.trade_snapshots = []
+            self.last_snapshot_time = 0
+
             self.position = {'size': 0.0, 'entry_price': 0.0, 'sl': 0.0, 'tp': 0.0, 'entry_time': 0}
 
     def _check_user_input(self):
