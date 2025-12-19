@@ -157,3 +157,57 @@ class MomentumCalculator:
         for T in self.periods:
             results[f"T_{T}"] = self.get_momentum(prices, T)
         return results
+
+
+# 对数收益率的滚动标准差 ，不是严谨的已实现波动率
+class RealizedVolatilityCalculator:
+    def __init__(self, periods=[5, 10, 25, 50]):
+        self.periods = periods
+        self.price_history = []
+        self.log_returns = []
+
+    def update(self, price):
+        self.price_history.append(price)
+        max_period = max(self.periods)
+        if len(self.price_history) > max_period + 1:  # 需要额外一个点计算收益率
+            self.price_history.pop(0)
+        
+        # 计算对数收益率
+        if len(self.price_history) >= 2:
+            log_ret = np.log(self.price_history[-1] / self.price_history[-2])
+            self.log_returns.append(log_ret)
+            # 保持对数收益率历史长度与最大周期一致
+            if len(self.log_returns) > max_period:
+                self.log_returns.pop(0)
+        
+        volatility_values = {}
+        
+        for T in self.periods:
+            if len(self.log_returns) >= T:
+                # 使用对数收益率的滚动标准差计算已实现波动率
+                volatility = np.std(self.log_returns[-T:])
+                volatility_values[f"T_{T}"] = volatility
+            else:
+                volatility_values[f"T_{T}"] = None
+        
+        return volatility_values
+
+    def get_volatility(self, prices, T):
+        if len(prices) <= T:
+            return None
+        # 计算对数收益率
+        log_returns = []
+        for i in range(1, len(prices)):
+            log_returns.append(np.log(prices[i] / prices[i-1]))
+        
+        if len(log_returns) < T:
+            return None
+            
+        # 使用对数收益率的滚动标准差计算已实现波动率
+        return np.std(log_returns[-T:])
+    
+    def calculate_all_volatilities(self, prices):
+        results = {}
+        for T in self.periods:
+            results[f"T_{T}"] = self.get_volatility(prices, T)
+        return results

@@ -5,7 +5,7 @@ from river.forest import ARFClassifier as AdaptiveRandomForestClassifier
 from colorama import Fore
 
 from config import Config
-from math_tools import MathUtils, HInfinityFilter1D, OnlineEGARCH, FractalAnalysis, OnlineBOCPD, WaveletAnalyzer, MomentumCalculator
+from math_tools import MathUtils, HInfinityFilter1D, OnlineEGARCH, FractalAnalysis, OnlineBOCPD, WaveletAnalyzer, MomentumCalculator, RealizedVolatilityCalculator
 
 
 # ==========================================
@@ -40,6 +40,7 @@ class RandomForestClassifier:
         
         self.egarch, self.bocpd, self.fractal, self.wavelet = OnlineEGARCH(), OnlineBOCPD(), FractalAnalysis(), WaveletAnalyzer()
         self.momentum_calc = MomentumCalculator()
+        self.volatility_calc = RealizedVolatilityCalculator()
         self.rf_model = compose.Pipeline(
             preprocessing.StandardScaler(),
             AdaptiveRandomForestClassifier(n_models=10, seed=42)
@@ -76,6 +77,9 @@ class RandomForestClassifier:
             self.price_history_1m.append(curr_price)
             if len(self.price_history_1m) > 100:  # 保持最近100个价格点
                 self.price_history_1m.pop(0)
+            
+            # 更新波动率计算器
+            self.volatility_calc.update(curr_price)
             
         elif timeframe == '15m':
             if self.history_15m.empty:
@@ -124,12 +128,19 @@ class RandomForestClassifier:
 
         hf_diff = (curr_price - hf_val) / hf_val
         
-        # 计算四个时间段的动量
+        # 计算四个时间段的对数动量
         momentums = self.momentum_calc.update(curr_price)
         mom_5 = momentums.get('T_5', 0.0) if momentums.get('T_5') is not None else 0.0
         mom_10 = momentums.get('T_10', 0.0) if momentums.get('T_10') is not None else 0.0
         mom_25 = momentums.get('T_25', 0.0) if momentums.get('T_25') is not None else 0.0
         mom_50 = momentums.get('T_50', 0.0) if momentums.get('T_50') is not None else 0.0
+
+        # 计算四个时间段的已实现波动率
+        volatilities = self.volatility_calc.update(curr_price)
+        vol_5 = volatilities.get('T_5', 0.0) if volatilities.get('T_5') is not None else 0.0
+        vol_10 = volatilities.get('T_10', 0.0) if volatilities.get('T_10') is not None else 0.0
+        vol_25 = volatilities.get('T_25', 0.0) if volatilities.get('T_25') is not None else 0.0
+        vol_50 = volatilities.get('T_50', 0.0) if volatilities.get('T_50') is not None else 0.0
 
         features = np.array([
             hf_diff,
@@ -145,7 +156,11 @@ class RandomForestClassifier:
             mom_10,
             mom_25,
             mom_50,
-            self.price_prediction_diff  # 添加价格预测差值作为新特征
+            vol_5,
+            vol_10,
+            vol_25,
+            vol_50,
+            self.price_prediction_diff  # 价格预测差值
         ]).reshape(1, -1)
 
         return {
@@ -153,6 +168,7 @@ class RandomForestClassifier:
             'vol_explosion': vol_expl, 'hurst': hurst, 'cp_prob': cp_prob,
             'hf_diff': hf_diff, 'wavelet_energy': wav_eng,
             'mom_5': mom_5, 'mom_10': mom_10, 'mom_25': mom_25, 'mom_50': mom_50,
+            'vol_5': vol_5, 'vol_10': vol_10, 'vol_25': vol_25, 'vol_50': vol_50,
             'range_pct': range_pct, 'price_prediction_diff': self.price_prediction_diff
         }
 
