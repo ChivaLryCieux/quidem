@@ -24,11 +24,10 @@ class DisplayManager:
         print(f"========================================={Style.RESET_ALL}")
         print(f"{Fore.GREEN}>>> 模式: {mode_name}{Style.RESET_ALL}")
 
-    def log_entry(self, regime, color, side, leverage, obi, price, sl, tp, fr):
+    def log_entry(self, regime, color, side, leverage, obi, price, sl, tp):
         sys.stdout.write("\r" + " " * 100 + "\r")
         dir_str = "开多" if side == 1 else "开空"
-        fr_str = f"FR:{fr * 100:.4f}%"
-        print(f"\n{color}>>> ⚡️ {regime} | {dir_str} | {leverage}x | OBI:{obi:.2f} | {fr_str}{Style.RESET_ALL}")
+        print(f"\n{color}>>> ⚡️ {regime} | {dir_str} | {leverage}x | OBI:{obi:.2f}{Style.RESET_ALL}")
         print(f"    🎯 TP: {tp:.4f} | 🛡️ SL: {sl:.4f}")
 
     def log_exit(self, reason, price, pnl, fee, balance, extra=""):
@@ -37,13 +36,12 @@ class DisplayManager:
         print(
             f"\n{reason} | P:{price} | PnL:{pnl_color}{pnl:+.2f}{Style.RESET_ALL} (Fee:-{fee:.2f}) | Bal:${balance:.2f} {extra}")
 
-    def update_status(self, pos, regime, color, obi, pnl, price, fr):
+    def update_status(self, pos, regime, color, obi, pnl, price, hf_pred_1m, hf_pred_diff, ai_conf):
         status = "🟢 LONG" if pos > 0 else "🔴 SHORT" if pos < 0 else "⚪ WAIT"
         pnl_c = Fore.GREEN if pnl >= 0 else Fore.RED
-        fr_c = Fore.RED if (pos > 0 and fr > 0) or (pos < 0 and fr < 0) else Fore.GREEN
         bar = (f"\r{status} | {color}{regime}{Style.RESET_ALL} | OBI:{obi:+.2f} | "
-               f"Price:{price:.4f} | PnL:{pnl_c}${pnl:+.2f}{Style.RESET_ALL} | FR:{fr_c}{fr * 100:.4f}%{Style.RESET_ALL}")
-        sys.stdout.write(f"{bar:<110}")
+               f"Price:{price:.4f} | HF1m:{hf_pred_1m:.4f} | Diff:{hf_pred_diff:+.4f} | AI:{ai_conf:.2f} | PnL:{pnl_c}${pnl:+.2f}{Style.RESET_ALL}")
+        sys.stdout.write(f"{bar:<120}")
         sys.stdout.flush()
 
     def log_msg(self, msg, type="info"):

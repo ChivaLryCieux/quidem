@@ -152,9 +152,13 @@ class QuantBot:
         # 4. UI更新
         unrealized_pnl = (curr_price - self.position['entry_price']) * self.position['size'] if self.position[
                                                                                                     'size'] != 0 else 0
+        # 获取H无穷滤波器1min预测价格、15min与1min预测价差和AI置信度
+        hf_pred_1m = self.brain.rf_classifier.hf_predictor_1m.x if analysis else 0.0
+        hf_pred_diff = self.brain.rf_classifier.price_prediction_diff if analysis else 0.0
+        ai_conf = analysis.get('ai_prediction', (0, 0.0))[1] if analysis else 0.0
         self.ui.update_status(self.position['size'], self.brain.state, self.brain.color, 
                              analysis.get('obi', 0.0) if analysis else 0.0, 
-                             unrealized_pnl, curr_price, funding_rate)
+                             unrealized_pnl, curr_price, hf_pred_1m, hf_pred_diff, ai_conf)
 
     def _manage_position(self, curr_price, funding_rate):
         pos = self.position
@@ -205,7 +209,7 @@ class QuantBot:
 
                     self.ui.log_entry(regime, self.brain.color, sig, lev, 
                                      data.get('obi', 0.0), price, self.position['sl'],
-                                     self.position['tp'], funding_rate)
+                                     self.position['tp'])
                     self.profit_flip_count, self.was_in_profit = 0, False
 
     def _execute_exit(self, reason, price, funding_rate):

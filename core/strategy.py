@@ -112,9 +112,6 @@ class RandomForestClassifier:
 
         # 仅当价格变化时更新复杂滤波器，避免重复计算
         eg_vol = self.egarch.update(log_ret)
-        # cp_prob和hurst已被移除，使用默认值
-        cp_prob = 0.0
-        hurst = 0.5
 
         hf_val = self.hf.update(curr_price)
         wav_res, wav_eng = self.wavelet.process(df['close'].values)
@@ -147,8 +144,6 @@ class RandomForestClassifier:
             hf_diff,
             eg_vol * 1000,
             rsi / 100.0,
-            cp_prob,
-            hurst,
             vol_expl,
             range_pct,
             (curr_price - wav_res) / curr_price * 100,
@@ -166,8 +161,7 @@ class RandomForestClassifier:
 
         return {
             'features': features, 'price': curr_price, 'atr': atr, 'rsi': rsi,
-            'vol_explosion': vol_expl, 'hurst': hurst, 'cp_prob': cp_prob,
-            'hf_diff': hf_diff, 'wavelet_energy': wav_eng,
+            'vol_explosion': vol_expl, 'hf_diff': hf_diff, 'wavelet_energy': wav_eng,
             'mom_5': mom_5, 'mom_10': mom_10, 'mom_25': mom_25, 'mom_50': mom_50,
             'vol_5': vol_5, 'vol_10': vol_10, 'vol_25': vol_25, 'vol_50': vol_50,
             'range_pct': range_pct, 'price_prediction_diff': self.price_prediction_diff
@@ -227,19 +221,19 @@ class StateMachine:
         self.state, self.color = "INIT", Fore.WHITE
         self.ob_analyzer = OrderBookAnalyzer()
 
-    def determine_regime(self, range_pct, vol_expl, hurst, cp_prob):
+    def determine_regime(self, range_pct, vol_expl):
         prev = self.state
         if range_pct < 0.0015:
             self.state, self.color = "💤 NOISE", Fore.WHITE
-        elif vol_expl > 1.5 or (vol_expl > 1.05 and cp_prob > 0.25):
+        elif vol_expl > 1.5:
             self.state, self.color = "💥 BREAKOUT", Fore.MAGENTA
-        elif hurst > 0.55:
-            if prev == "🚀 TREND" and cp_prob > 0.5:
-                self.state, self.color = "🦀 RANGE", Fore.YELLOW
-            else:
-                self.state, self.color = "🚀 TREND", Fore.CYAN
         else:
-            self.state, self.color = "🦀 RANGE", Fore.YELLOW
+            # 简化状态判断，不再依赖hurst和cp_prob
+            if vol_expl > 1.05:
+                self.state, self.color = "💥 BREAKOUT", Fore.MAGENTA
+            else:
+                # 默认为震荡状态，除非有明确的趋势信号
+                self.state, self.color = "🦀 RANGE", Fore.YELLOW
         return self.state, self.color
 
     def get_entry_signal(self, analysis_data, current_price):
@@ -348,9 +342,7 @@ class StrategyBrain:
         # 确定市场状态
         self.state, self.color = self.state_machine.determine_regime(
             feature_data['range_pct'], 
-            feature_data['vol_explosion'], 
-            feature_data['hurst'], 
-            feature_data['cp_prob']
+            feature_data['vol_explosion']
         )
         
         # AI预测
