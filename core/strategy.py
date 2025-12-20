@@ -164,7 +164,9 @@ class RandomForestClassifier:
             'vol_explosion': vol_expl, 'hf_diff': hf_diff, 'wavelet_energy': wav_eng,
             'mom_5': mom_5, 'mom_10': mom_10, 'mom_25': mom_25, 'mom_50': mom_50,
             'vol_5': vol_5, 'vol_10': vol_10, 'vol_25': vol_25, 'vol_50': vol_50,
-            'range_pct': range_pct, 'price_prediction_diff': self.price_prediction_diff
+            'range_pct': range_pct, 'price_prediction_diff': self.price_prediction_diff,
+            'momentum_values': momentums,  # 添加完整的动量字典
+            'volatility_values': volatilities  # 添加完整的波动率字典
         }
 
     def _update_price_prediction_diff(self):
@@ -214,7 +216,54 @@ class RandomForestClassifier:
 
 
 # ==========================================
-# 3. 状态机 - 负责市场状态判断和交易信号生成
+# 3. K均值聚类分析器
+# ==========================================
+class KMeansClusterAnalyzer:
+    def __init__(self, n_clusters=5):
+        self.n_clusters = n_clusters
+        self.feature_names = ['mom_5', 'mom_10', 'mom_25', 'mom_50', 'vol_5', 'vol_10', 'vol_25', 'vol_50']
+        # 预定义的质心，每个质心包含8个特征（4个动量+4个波动率）
+        self.centroids = {
+            0: [-0.0077, -0.0136, -0.0246, -0.0321, 0.0048, 0.0048, 0.0048, 0.0045],  # 簇0的质心：[mom_5, mom_10, mom_25, mom_50, vol_5, vol_10, vol_25, vol_50]
+            1: [-0.0005, -0.0007, -0.0007, -0.0004, 0.0022, 0.0023, 0.0026, 0.0028],  # 簇1的质心
+            2: [-0.0625, -0.1557, -0.1866, -0.2102, 0.0709, 0.0770, 0.0484, 0.0342],  # 簇2的质心
+            3: [0.0074, 0.0121, 0.0193, 0.0219, 0.0042, 0.0044, 0.0043, 0.0043],  # 簇3的质心
+            4: [0.0072, 0.0173, -0.0216, -0.1281, 0.0098, 0.0132, 0.0278, 0.0379]   # 簇4的质心
+        }
+        self.initialized = True
+        
+    def predict_cluster(self, momentum_values, volatility_values):
+        """
+        根据输入的动量和波动率值预测所属的簇
+        momentum_values: 包含4个动量值的字典
+        volatility_values: 包含4个波动率值的字典
+        返回: (cluster_id, distance) - 簇ID和到质心的距离
+        """
+        # 构建特征向量
+        features = []
+        for name in self.feature_names[:4]:  # 动量特征
+            features.append(momentum_values.get(name, 0.0))
+        for name in self.feature_names[4:]:  # 波动率特征
+            features.append(volatility_values.get(name, 0.0))
+            
+        feature_vector = np.array(features)
+        
+        # 计算到每个质心的距离
+        min_distance = float('inf')
+        best_cluster = 0
+        
+        for cluster_id, centroid in self.centroids.items():
+            # 计算欧氏距离
+            distance = np.linalg.norm(feature_vector - centroid)
+            if distance < min_distance:
+                min_distance = distance
+                best_cluster = cluster_id
+                
+        return best_cluster, min_distance
+
+
+# ==========================================
+# 4. 状态机 - 负责市场状态判断和交易信号生成
 # ==========================================
 class StateMachine:
     def __init__(self):
@@ -313,12 +362,13 @@ class StateMachine:
 
 
 # ==========================================
-# 4. 策略大脑 - 协调随机森林和状态机
+# 5. 策略大脑 - 协调随机森林、状态机和聚类分析
 # ==========================================
 class StrategyBrain:
     def __init__(self):
         self.rf_classifier = RandomForestClassifier()
         self.state_machine = StateMachine()
+        self.cluster_analyzer = KMeansClusterAnalyzer()  # 添加聚类分析器
         self.state = self.state_machine.state
         self.color = self.state_machine.color
 
@@ -356,3 +406,13 @@ class StrategyBrain:
 
     def get_entry_signal(self, analysis_data, current_price):
         return self.state_machine.get_entry_signal(analysis_data, current_price)
+    
+    def predict_cluster(self, analysis_data):
+        """
+        根据分析数据预测所属的簇
+        返回: (cluster_id, distance) - 簇ID和到质心的距离
+        """
+        momentum_values = analysis_data.get('momentum_values', {})
+        volatility_values = analysis_data.get('volatility_values', {})
+        
+        return self.cluster_analyzer.predict_cluster(momentum_values, volatility_values)
