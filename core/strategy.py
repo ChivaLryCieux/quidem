@@ -5,7 +5,7 @@ from river.forest import ARFClassifier as AdaptiveRandomForestClassifier
 from colorama import Fore
 
 from config import Config
-from math_tools import MathUtils, HInfinityFilter1D, OnlineEGARCH, FractalAnalysis, OnlineBOCPD, WaveletAnalyzer, MomentumCalculator, RealizedVolatilityCalculator
+from math_tools import MathUtils, HInfinityFilter1D, OnlineEGARCH, WaveletAnalyzer, MomentumCalculator, RealizedVolatilityCalculator
 
 
 # ==========================================
@@ -38,7 +38,7 @@ class RandomForestClassifier:
         self.hf_predictor_1m = HInfinityFilter1D(gamma=0.03)
         self.hf_predictor_15m = HInfinityFilter1D(gamma=0.03)
         
-        self.egarch, self.bocpd, self.fractal, self.wavelet = OnlineEGARCH(), OnlineBOCPD(), FractalAnalysis(), WaveletAnalyzer()
+        self.egarch, self.wavelet = OnlineEGARCH(), WaveletAnalyzer()
         self.momentum_calc = MomentumCalculator()
         self.volatility_calc = RealizedVolatilityCalculator()
         self.rf_model = compose.Pipeline(
@@ -112,8 +112,9 @@ class RandomForestClassifier:
 
         # 仅当价格变化时更新复杂滤波器，避免重复计算
         eg_vol = self.egarch.update(log_ret)
-        cp_prob = self.bocpd.update(log_ret)
-        hurst = self.fractal.update(curr_price)
+        # cp_prob和hurst已被移除，使用默认值
+        cp_prob = 0.0
+        hurst = 0.5
 
         hf_val = self.hf.update(curr_price)
         wav_res, wav_eng = self.wavelet.process(df['close'].values)
