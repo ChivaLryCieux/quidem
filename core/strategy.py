@@ -269,6 +269,7 @@ class StateMachine:
     def __init__(self):
         self.state, self.color = "INIT", Fore.WHITE
         self.ob_analyzer = OrderBookAnalyzer()
+        self.last_cluster = 5  # 初始值记为5
 
     def determine_regime(self, range_pct, vol_expl):
         prev = self.state
@@ -287,7 +288,7 @@ class StateMachine:
 
     def get_entry_signal(self, analysis_data, current_price):
         """
-        根据当前市场状态和指标计算交易信号
+        根据新的状态机判定机制计算交易信号
         返回: (signal, leverage)
         signal: 1 (Buy), -1 (Sell), 0 (None)
         """
@@ -314,49 +315,39 @@ class StateMachine:
         if analysis_data['atr'] < current_price * Config.MIN_ATR_PCT:
             return 0, lev
 
-        # 2. 基于价格预测差值的新交易条件
-        # 如果预测差值大于MIN_TP_DISTANCE，才考虑做多
-        if price_pred_diff > Config.MIN_TP_DISTANCE:
-            prediction_signal = 1  # 做多信号
-        # 如果预测差值小于-MIN_TP_DISTANCE，才考虑做空
-        elif price_pred_diff < -Config.MIN_TP_DISTANCE:
-            prediction_signal = -1  # 做空信号
-        else:
-            prediction_signal = 0  # 不交易
-
-        # 如果预测信号为0，直接返回不交易
-        if prediction_signal == 0:
+        # 1. 硬阈值过滤器
+        # 如果价差范围在负最小止盈距离和正最小止盈距离之间，不开仓
+        if -Config.MIN_TP_DISTANCE <= price_pred_diff <= Config.MIN_TP_DISTANCE:
             return 0, lev
 
-        # 3. 策略核心逻辑
-        if regime == "🦀 RANGE":
-            # 震荡策略: RSI 反转 + 预测信号确认
-            if prediction_signal == 1 and analysis_data['rsi'] < 30 and ai_dir != -1:
-                sig = 1
-            elif prediction_signal == -1 and analysis_data['rsi'] > 70 and ai_dir != 1:
-                sig = -1
-            lev = 15  # 激进震荡杠杆
-
-        elif regime == "🚀 TREND":
-            # 趋势策略: H-inf滤波 + AI方向 + OBI盘口 + 预测信号
-            filt = 1 if analysis_data['hf_diff'] > 0 else -1
-
-            # 顺势做多
-            if prediction_signal == 1 and filt == 1 and ai_dir == 1 and obi >= Config.OBI_THRESHOLD_TREND:
-                sig = 1
-            # 顺势做空
-            elif prediction_signal == -1 and filt == -1 and ai_dir == -1 and obi <= -Config.OBI_THRESHOLD_TREND:
-                sig = -1
-            lev = 20  # 趋势跟随杠杆
-
-        elif regime == "💥 BREAKOUT":
-            # 突破策略: 高AI置信度 + OBI 确认 + 预测信号
-            if ai_conf > 0.5:
-                if prediction_signal == 1 and obi > Config.OBI_THRESHOLD_BREAKOUT:
-                    sig = 1
-                elif prediction_signal == -1 and obi < -Config.OBI_THRESHOLD_BREAKOUT:
-                    sig = -1
-                lev = Config.MAX_LEVERAGE
+        # 2. 聚类分析器
+        # 获取当前聚类
+        cluster_id, _ = analysis_data.get('cluster', (5, 0.0))
+        
+        # 聚类0 跌：如果价差为负且AI方向为做空，信心大于0.55，5倍做空
+        if cluster_id == 0 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.55:
+            sig = -1
+            lev = 5
+        # 聚类1 跌+平：如果上一聚类非1且价差为负且AI方向为做空，信心大于0.55，5倍做空
+        elif cluster_id == 1 and self.last_cluster != 1 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.55:
+            sig = -1
+            lev = 5
+        # 聚类2 暴跌：如果上一聚类非2且价差为负且AI方向为做空，信心大于0.55，5倍做空
+        elif cluster_id == 2 and self.last_cluster != 2 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.55:
+            sig = -1
+            lev = 5
+        # 聚类3：涨 如果价差为正且AI方向为做多，信心大于0.55，5倍做多
+        elif cluster_id == 3 and price_pred_diff > 0 and ai_dir == 1 and ai_conf > 0.55:
+            sig = 1
+            lev = 5
+        # 聚类4：由暴跌转暴涨 如果上一聚类非4且价差为正且AI方向为做多，信心大于0.55，5倍做多
+        elif cluster_id == 4 and self.last_cluster != 4 and price_pred_diff > 0 and ai_dir == 1 and ai_conf > 0.55:
+            sig = 1
+            lev = 5
+        
+        # 更新上一聚类记录器
+        if sig != 0:
+            self.last_cluster = cluster_id
 
         return sig, lev
 
@@ -398,6 +389,12 @@ class StrategyBrain:
         # AI预测
         ai_dir, ai_conf = self.rf_classifier.predict(feature_data['features'])
         feature_data['ai_prediction'] = (ai_dir, ai_conf)
+        
+        # 聚类分析
+        momentum_values = feature_data.get('momentum_values', {})
+        volatility_values = feature_data.get('volatility_values', {})
+        cluster_id, cluster_distance = self.cluster_analyzer.predict_cluster(momentum_values, volatility_values)
+        feature_data['cluster'] = (cluster_id, cluster_distance)
         
         return feature_data
 

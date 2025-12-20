@@ -168,9 +168,59 @@ class QuantBot:
         if not self.was_in_profit and is_prof: self.profit_flip_count += 1
         self.was_in_profit = is_prof
 
+        # 获取当前分析数据，用于获取ATR和价差信息
+        analysis = self.brain.analyze()
+        atr = analysis.get('atr', 0.0) if analysis else 0.0
+        price_pred_diff = analysis.get('price_prediction_diff', 0.0) if analysis else 0.0
+        
+        # 根据翻转次数动态调整止盈距离
+        # 第一次翻转，止盈距离不变，第二次翻转，止盈距离变为原来的75%，第三次及以上，一有盈利就平仓
+        if self.profit_flip_count >= 1:
+            # 计算原始止盈距离
+            original_tp_distance = max(atr * 2, pos['entry_price'] * Config.MIN_TP_DISTANCE)
+            
+            # 根据翻转次数调整止盈距离
+            if self.profit_flip_count == 1:
+                # 第一次翻转，保持原有止盈距离
+                adjusted_tp_distance = original_tp_distance
+            elif self.profit_flip_count == 2:
+                # 第二次翻转，止盈距离变为原来的75%
+                adjusted_tp_distance = original_tp_distance * 0.75
+            else:
+                # 第三次及以上，一有盈利就平仓
+                adjusted_tp_distance = 0.0  # 任何盈利都平仓
+            
+            # 更新止盈价格
+            if pos['size'] > 0:  # 做多
+                pos['tp'] = pos['entry_price'] + adjusted_tp_distance
+            else:  # 做空
+                pos['tp'] = pos['entry_price'] - adjusted_tp_distance
+
         should_exit, reason = self.risk.check_exit_conditions(
-            pos, curr_price, time.time() * 1000, self.profit_flip_count
+            pos, curr_price, time.time() * 1000, self.profit_flip_count, atr, self.balance
         )
+
+        # 处理特殊返回值：需要检查价差
+        if should_exit == "CHECK_PRICE_DIFF":
+            # 持仓15分钟后仍未平仓，则判定新的15步价差
+            # 若依然大于/小于最小止盈距离（和开仓方向一致），则继续持仓
+            # 否则，若有盈利则立即平仓，若亏损，依然继续持仓
+            direction = 1 if pos['size'] > 0 else -1
+            
+            # 检查价差是否与开仓方向一致且大于最小止盈距离
+            if direction == 1 and price_pred_diff > Config.MIN_TP_DISTANCE:
+                # 做多且价差为正且大于最小止盈距离，继续持仓
+                should_exit = False
+            elif direction == -1 and price_pred_diff < -Config.MIN_TP_DISTANCE:
+                # 做空且价差为负且小于负最小止盈距离，继续持仓
+                should_exit = False
+            else:
+                # 价差不满足条件，若有盈利则立即平仓，若亏损，依然继续持仓
+                if raw_pnl_pct > 0:
+                    should_exit = True
+                    reason = f"💰 PriceDiffChanged({price_pred_diff:.4f})"
+                else:
+                    should_exit = False
 
         if should_exit:
             self._execute_exit(reason, curr_price, funding_rate)
@@ -195,6 +245,7 @@ class QuantBot:
                 side = 'buy' if sig == 1 else 'sell'
                 # 交易执行仍然走 REST API
                 if self.exchange.execute_order(side, amount):
+                    # 设置止盈止损，使用新的平仓判定逻辑
                     self.position = {
                         'size': amount if sig == 1 else -amount,
                         'entry_price': price,
@@ -202,10 +253,18 @@ class QuantBot:
                         'sl': price * (1 - 0.005) if sig == 1 else price * (1 + 0.005),
                         'tp': price * (1 + 0.01) if sig == 1 else price * (1 - 0.01)
                     }
+                    
+                    # 根据新的状态机逻辑设置止损止盈
+                    # 使用ATR和最小止盈距离中的较大值
+                    atr = data.get('atr', 0.0)
+                    tp_distance = max(atr * 2, price * Config.MIN_TP_DISTANCE)
+                    
+                    # 设置止损
                     dist = price * (1 / lev) * 0.8
                     self.position['sl'] = price - dist if sig == 1 else price + dist
-                    tp_mult = 3.0 if regime == "🚀 TREND" else 1.5
-                    self.position['tp'] = price + max(data['atr'] * tp_mult, price * Config.MIN_TP_DISTANCE) * sig
+                    
+                    # 设置止盈
+                    self.position['tp'] = price + tp_distance if sig == 1 else price - tp_distance
 
                     self.ui.log_entry(regime, self.brain.color, sig, lev, 
                                      data.get('obi', 0.0), price, self.position['sl'],
