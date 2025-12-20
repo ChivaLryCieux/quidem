@@ -11,7 +11,7 @@ import time
 # 1. 配置区域 (User Configuration)
 # ==========================================
 SYMBOL = 'XRP/USDT'  # 交易对
-TIMEFRAME = '1h'  # K线周期, 主要分析15m和1h
+TIMEFRAME = '15m'  # K线周期, 主要分析15m和1h
 LIMIT = 10000  # 拉取K线数量
 WINDOWS = [5, 10, 25, 50]  # 特征窗口 T
 N_CLUSTERS = 5  # 聚类数量 K
@@ -153,7 +153,13 @@ def plot_results_custom(df, transition_probs, n_clusters):
 
     # --- 图 2: 特征热力图 ---
     ax2 = fig.add_subplot(gs[1, 0])
-    feature_cols = df.columns[df.columns.str.contains('mom_|vol_')]
+    # 1. 分别筛选出 mom_ 和 vol_ 开头的列
+    mom_cols = df.columns[df.columns.str.contains('mom_')]
+    vol_cols = df.columns[df.columns.str.contains('vol_')]
+    # 2. 使用 np.r_ 按顺序连接两个列表
+    feature_cols = np.r_[mom_cols, vol_cols]
+    # 3. 转换为 Pandas Index 对象，以保持一致性
+    feature_cols = pd.Index(feature_cols)
     cluster_means = df.groupby('cluster')[feature_cols].mean()
 
     # 因为对数动量均值通常接近0，这里使用 'vlag' (红蓝)
