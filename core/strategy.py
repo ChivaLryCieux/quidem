@@ -222,17 +222,22 @@ class KMeansClusterAnalyzer:
             1: [-0.0005, -0.0007, -0.0007, -0.0004, 0.0022, 0.0023, 0.0026, 0.0028],  # 簇1的质心
             2: [-0.0625, -0.1557, -0.1866, -0.2102, 0.0709, 0.0770, 0.0484, 0.0342],  # 簇2的质心
             3: [0.0074, 0.0121, 0.0193, 0.0219, 0.0042, 0.0044, 0.0043, 0.0043],  # 簇3的质心
-            4: [0.0072, 0.0173, -0.0216, -0.1281, 0.0098, 0.0132, 0.0278, 0.0379]   # 簇4的质心
+            4: [0.0628, 0.1556, 0.1866, 0.2102, 0.0708, 0.0769, 0.0484, 0.0342]   # 簇4的质心
         }
+        self.is_initialized = False  # 标记是否已经进行过有效聚类
+        self.last_valid_cluster = 5  # 初始状态为簇5
         self.initialized = True
         
     def predict_cluster(self, momentum_values, volatility_values):
-        """
-        根据输入的动量和波动率值预测所属的簇
-        momentum_values: 包含4个动量值的字典
-        volatility_values: 包含4个波动率值的字典
-        返回: (cluster_id, distance) - 簇ID和到质心的距离
-        """
+        """根据动量和波动率值预测当前市场所属的聚类"""
+        if not momentum_values or not volatility_values:
+            # 如果还没有进行过有效聚类，保持簇5状态
+            if not self.is_initialized:
+                return 5, 999.0
+            # 如果已经初始化过，返回上次有效的聚类
+            else:
+                return self.last_valid_cluster, 0.0
+            
         # 构建特征向量
         features = []
         for name in self.feature_names[:4]:  # 动量特征
@@ -252,7 +257,12 @@ class KMeansClusterAnalyzer:
             if distance < min_distance:
                 min_distance = distance
                 best_cluster = cluster_id
-                
+        
+        # 一旦获得有效聚类，标记为已初始化，并记录有效聚类
+        if best_cluster != 5:
+            self.is_initialized = True
+            self.last_valid_cluster = best_cluster
+            
         return best_cluster, min_distance
 
 
@@ -315,10 +325,32 @@ class StateMachine:
 
         # 2. 聚类分析器
         # 获取当前聚类
-        cluster_id, _ = analysis_data.get('cluster', (5, 0.0))
+        current_cluster_data = analysis_data.get('cluster', (5, 0.0))
+        cluster_id = current_cluster_data[0]
+        cluster_distance = current_cluster_data[1]
         
+        # 状态机逻辑：管理簇5到正常簇的转换
+        if self.last_cluster == 5:
+            if cluster_id == 5:
+                print(f"[DEBUG] 初始状态: 等待首次聚类分析...")
+                return 0, lev
+            else:
+                print(f"[DEBUG] 🔄 聚类初始化: 簇5 → 簇{cluster_id} (距离: {cluster_distance:.4f})")
+                self.last_cluster = cluster_id
+        else:
+            if cluster_id == 5:
+                print(f"[DEBUG] ⚠️  聚类异常: 返回簇5，保持上次聚类簇{self.last_cluster}")
+                cluster_id = self.last_cluster
+            elif cluster_id != self.last_cluster:
+                print(f"[DEBUG] 🔄 聚类变化: 簇{self.last_cluster} → 簇{cluster_id} (距离: {cluster_distance:.4f})")
+                self.last_cluster = cluster_id
+            else:
+                print(f"[DEBUG] 聚类稳定: 保持在簇{cluster_id}")
+        
+        print(f"[DEBUG] 当前状态: Cluster={cluster_id}, Last={self.last_cluster}, Distance={cluster_distance:.4f}")
+            
         # 聚类0 跌：如果价差为负且AI方向为做空，信心大于特定值，5倍做空
-        if cluster_id == 0 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
+        if cluster_id == 0 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > Config.AI_CONFIDENCE_THRESHOLD:
             sig = -1
             lev = 5
         # 聚类1 跌+平：如果上一聚类非1且价差为负且AI方向为做空，信心大于特定值，5倍做空
