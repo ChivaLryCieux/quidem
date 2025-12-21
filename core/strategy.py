@@ -33,10 +33,10 @@ class OrderBookAnalyzer:
 # ==========================================
 class RandomForestClassifier:
     def __init__(self):
-        self.hf = HInfinityFilter1D(gamma=0.03)
+        self.hf = HInfinityFilter1D(gamma=0.13)
         # 添加两个额外的H无穷滤波器，分别用于1m和15m预测
-        self.hf_predictor_1m = HInfinityFilter1D(gamma=0.03)
-        self.hf_predictor_15m = HInfinityFilter1D(gamma=0.03)
+        self.hf_predictor_1m = HInfinityFilter1D(gamma=0.13)
+        self.hf_predictor_15m = HInfinityFilter1D(gamma=0.13)
         
         self.egarch, self.wavelet = OnlineEGARCH(), WaveletAnalyzer()
         self.momentum_calc = MomentumCalculator()
