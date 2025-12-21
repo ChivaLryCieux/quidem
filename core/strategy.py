@@ -332,41 +332,41 @@ class StateMachine:
         # 状态机逻辑：管理簇5到正常簇的转换
         if self.last_cluster == 5:
             if cluster_id == 5:
-                print(f"[DEBUG] 初始状态: 等待首次聚类分析...")
+                print(f"初始状态: 等待首次聚类分析...")
                 return 0, lev
             else:
-                print(f"[DEBUG] 🔄 聚类初始化: 簇5 → 簇{cluster_id} (距离: {cluster_distance:.4f})")
+                print(f" 🔄 聚类初始化: 簇5 → 簇{cluster_id} (距离: {cluster_distance:.4f})")
                 self.last_cluster = cluster_id
         else:
             if cluster_id == 5:
-                print(f"[DEBUG] ⚠️  聚类异常: 返回簇5，保持上次聚类簇{self.last_cluster}")
+                print(f" ⚠️  聚类异常返回簇5，保持上次聚类簇{self.last_cluster}")
                 cluster_id = self.last_cluster
             elif cluster_id != self.last_cluster:
-                print(f"[DEBUG] 🔄 聚类变化: 簇{self.last_cluster} → 簇{cluster_id} (距离: {cluster_distance:.4f})")
+                print(f" 🔄 聚类变化: 簇{self.last_cluster} → 簇{cluster_id} (距离: {cluster_distance:.4f})")
                 self.last_cluster = cluster_id
             else:
-                print(f"[DEBUG] 聚类稳定: 保持在簇{cluster_id}")
+                print(f"聚类稳定: 保持在簇{cluster_id}")
         
-        print(f"[DEBUG] 当前状态: Cluster={cluster_id}, Last={self.last_cluster}, Distance={cluster_distance:.4f}")
+        print(f"当前状态: Cluster={cluster_id}, Last={self.last_cluster}, Distance={cluster_distance:.4f}")
             
         # 聚类0 跌：如果价差为负且AI方向为做空，信心大于特定值，5倍做空
-        if cluster_id == 0 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > Config.AI_CONFIDENCE_THRESHOLD:
+        if cluster_id == 0 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
             sig = -1
             lev = 5
-        # 聚类1 跌+平：如果上一聚类非1且价差为负且AI方向为做空，信心大于特定值，5倍做空
-        elif cluster_id == 1 and self.last_cluster != 1 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
+        # 聚类1 跌+平：如果价差为负且AI方向为做空，信心大于特定值，5倍做空
+        elif cluster_id == 1 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
             sig = -1
             lev = 5
-        # 聚类2 暴跌：如果上一聚类非2且价差为负且AI方向为做空，信心大于特定值，5倍做空
-        elif cluster_id == 2 and self.last_cluster != 2 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
+        # 聚类2 暴跌：如果价差为负且AI方向为做空，信心大于特定值，5倍做空
+        elif cluster_id == 2 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
             sig = -1
             lev = 5
         # 聚类3：涨 如果价差为正且AI方向为做多，信心大于特定值，5倍做多
         elif cluster_id == 3 and price_pred_diff > 0 and ai_dir == 1 and ai_conf > 0.51:
             sig = 1
             lev = 5
-        # 聚类4：由暴跌转暴涨 如果上一聚类非4且价差为正且AI方向为做多，信心大于特定值，5倍做多
-        elif cluster_id == 4 and self.last_cluster != 4 and price_pred_diff > 0 and ai_dir == 1 and ai_conf > 0.51:
+        # 聚类4：由暴跌转暴涨 如果价差为正且AI方向为做多，信心大于特定值，5倍做多
+        elif cluster_id == 4 and price_pred_diff > 0 and ai_dir == 1 and ai_conf > 0.51:
             sig = 1
             lev = 5
         

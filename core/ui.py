@@ -25,13 +25,6 @@ class DisplayManager:
         print(f"{Fore.GREEN}>>> 模式: {mode_name}{Style.RESET_ALL}")
         if strategy_desc:
             print(f"{Fore.YELLOW}>>> 策略: {strategy_desc}{Style.RESET_ALL}")
-            try:
-                from strategy_config import StrategyConfig
-                current_config = StrategyConfig.get_config('CONSERVATIVE')
-                print(f"{Fore.CYAN}>>> AI置信度阈值: {current_config['AI_CONFIDENCE_THRESHOLD']}{Style.RESET_ALL}")
-                print(f"{Fore.CYAN}>>> 严格过滤器: {'启用' if current_config['ENABLE_STRICT_FILTERS'] else '禁用'}{Style.RESET_ALL}")
-            except:
-                pass
 
     def log_entry(self, regime, color, side, leverage, obi, price, sl, tp):
         sys.stdout.write("\r" + " " * 100 + "\r")
