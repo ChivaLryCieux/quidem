@@ -278,7 +278,6 @@ class StateMachine:
         elif vol_expl > 1.5:
             self.state, self.color = "💥 BREAKOUT", Fore.MAGENTA
         else:
-            # 简化状态判断，不再依赖hurst和cp_prob
             if vol_expl > 1.05:
                 self.state, self.color = "💥 BREAKOUT", Fore.MAGENTA
             else:
@@ -324,24 +323,24 @@ class StateMachine:
         # 获取当前聚类
         cluster_id, _ = analysis_data.get('cluster', (5, 0.0))
         
-        # 聚类0 跌：如果价差为负且AI方向为做空，信心大于0.55，5倍做空
-        if cluster_id == 0 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.55:
+        # 聚类0 跌：如果价差为负且AI方向为做空，信心大于0.51，5倍做空
+        if cluster_id == 0 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
             sig = -1
             lev = 5
-        # 聚类1 跌+平：如果上一聚类非1且价差为负且AI方向为做空，信心大于0.55，5倍做空
-        elif cluster_id == 1 and self.last_cluster != 1 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.55:
+        # 聚类1 跌+平：如果上一聚类非1且价差为负且AI方向为做空，信心大于0.51，5倍做空
+        elif cluster_id == 1 and self.last_cluster != 1 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
             sig = -1
             lev = 5
-        # 聚类2 暴跌：如果上一聚类非2且价差为负且AI方向为做空，信心大于0.55，5倍做空
-        elif cluster_id == 2 and self.last_cluster != 2 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.55:
+        # 聚类2 暴跌：如果上一聚类非2且价差为负且AI方向为做空，信心大于0.51，5倍做空
+        elif cluster_id == 2 and self.last_cluster != 2 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
             sig = -1
             lev = 5
-        # 聚类3：涨 如果价差为正且AI方向为做多，信心大于0.55，5倍做多
-        elif cluster_id == 3 and price_pred_diff > 0 and ai_dir == 1 and ai_conf > 0.55:
+        # 聚类3：涨 如果价差为正且AI方向为做多，信心大于0.51，5倍做多
+        elif cluster_id == 3 and price_pred_diff > 0 and ai_dir == 1 and ai_conf > 0.51:
             sig = 1
             lev = 5
-        # 聚类4：由暴跌转暴涨 如果上一聚类非4且价差为正且AI方向为做多，信心大于0.55，5倍做多
-        elif cluster_id == 4 and self.last_cluster != 4 and price_pred_diff > 0 and ai_dir == 1 and ai_conf > 0.55:
+        # 聚类4：由暴跌转暴涨 如果上一聚类非4且价差为正且AI方向为做多，信心大于0.51，5倍做多
+        elif cluster_id == 4 and self.last_cluster != 4 and price_pred_diff > 0 and ai_dir == 1 and ai_conf > 0.51:
             sig = 1
             lev = 5
         
