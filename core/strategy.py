@@ -320,8 +320,8 @@ class StateMachine:
 
         # 1. 硬阈值过滤器
         # 如果价差范围在负最小止盈距离和正最小止盈距离之间，不开仓
-        if -Config.MIN_TP_DISTANCE <= price_pred_diff <= Config.MIN_TP_DISTANCE:
-            return 0, lev
+        # if -Config.MIN_TP_DISTANCE <= price_pred_diff <= Config.MIN_TP_DISTANCE:
+        #     return 0, lev
 
         # 2. 聚类分析器
         # 获取当前聚类
@@ -350,23 +350,23 @@ class StateMachine:
         print(f"当前状态: Cluster={cluster_id}, Last={self.last_cluster}, Distance={cluster_distance:.4f}")
             
         # 聚类0 跌：如果价差为负且AI方向为做空，信心大于特定值，5倍做空
-        if cluster_id == 0 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
+        if cluster_id == 0 and ai_dir == -1 and ai_conf > 0.51:
             sig = -1
             lev = 5
         # 聚类1 跌+平：如果价差为负且AI方向为做空，信心大于特定值，5倍做空
-        elif cluster_id == 1 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
+        elif cluster_id == 1 and ai_dir == -1 and ai_conf > 0.51:
             sig = -1
             lev = 5
         # 聚类2 暴跌：如果价差为负且AI方向为做空，信心大于特定值，5倍做空
-        elif cluster_id == 2 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
+        elif cluster_id == 2 and ai_dir == -1 and ai_conf > 0.51:
             sig = -1
             lev = 5
         # 聚类3：涨 如果价差为正且AI方向为做多，信心大于特定值，5倍做多
-        elif cluster_id == 3 and price_pred_diff > 0 and ai_dir == 1 and ai_conf > 0.51:
+        elif cluster_id == 3 and ai_dir == 1 and ai_conf > 0.51:
             sig = 1
             lev = 5
         # 聚类4：由暴跌转暴涨 如果价差为正且AI方向为做多，信心大于特定值，5倍做多
-        elif cluster_id == 4 and price_pred_diff > 0 and ai_dir == 1 and ai_conf > 0.51:
+        elif cluster_id == 4 and ai_dir == 1 and ai_conf > 0.51:
             sig = 1
             lev = 5
         
