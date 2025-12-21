@@ -37,7 +37,7 @@ class Config:
     BAILOUT_ON_NTH_FLIP = 3
     FEE_BUFFER_PCT = 0.0012
     MIN_ATR_PCT = 0.0020
-    MIN_TP_DISTANCE = 0.0025
+    MIN_TP_DISTANCE = 0.003
 
     # 微观结构
     OBI_THRESHOLD_TREND = -0.2

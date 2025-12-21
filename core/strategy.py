@@ -170,18 +170,15 @@ class RandomForestClassifier:
         }
 
     def _update_price_prediction_diff(self):
-        """更新15分钟预测与1分钟预测的差值"""
+        """更新15分钟预测与1分钟预测的差值（价格差值，非比例）"""
         try:
             # 获取当前滤波器输出作为基础预测
             pred_15m_base = self.hf_predictor_15m.x
             pred_1m_base = self.hf_predictor_1m.x
             
-            # 如果价格历史不足，使用滤波器输出
+            # 如果价格历史不足，使用滤波器输出差值
             if len(self.price_history_1m) < 2 or len(self.price_history_15m) < 2:
-                if pred_1m_base > 0:
-                    self.price_prediction_diff = (pred_15m_base - pred_1m_base) / pred_1m_base
-                else:
-                    self.price_prediction_diff = 0.0
+                self.price_prediction_diff = pred_15m_base - pred_1m_base
                 return
             
             # 计算1分钟和15分钟的趋势
@@ -194,11 +191,8 @@ class RandomForestClassifier:
             # 预测1分钟后的价格
             pred_1m = pred_1m_base * (1 + trend_1m * 1)
             
-            # 计算相对差值（百分比）
-            if pred_1m > 0:
-                self.price_prediction_diff = (pred_15m - pred_1m) / pred_1m
-            else:
-                self.price_prediction_diff = 0.0
+            # 计算价格差值（非比例）
+            self.price_prediction_diff = pred_15m - pred_1m
         except Exception as e:
             self.price_prediction_diff = 0.0
 
@@ -323,23 +317,23 @@ class StateMachine:
         # 获取当前聚类
         cluster_id, _ = analysis_data.get('cluster', (5, 0.0))
         
-        # 聚类0 跌：如果价差为负且AI方向为做空，信心大于0.51，5倍做空
+        # 聚类0 跌：如果价差为负且AI方向为做空，信心大于特定值，5倍做空
         if cluster_id == 0 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
             sig = -1
             lev = 5
-        # 聚类1 跌+平：如果上一聚类非1且价差为负且AI方向为做空，信心大于0.51，5倍做空
+        # 聚类1 跌+平：如果上一聚类非1且价差为负且AI方向为做空，信心大于特定值，5倍做空
         elif cluster_id == 1 and self.last_cluster != 1 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
             sig = -1
             lev = 5
-        # 聚类2 暴跌：如果上一聚类非2且价差为负且AI方向为做空，信心大于0.51，5倍做空
+        # 聚类2 暴跌：如果上一聚类非2且价差为负且AI方向为做空，信心大于特定值，5倍做空
         elif cluster_id == 2 and self.last_cluster != 2 and price_pred_diff < 0 and ai_dir == -1 and ai_conf > 0.51:
             sig = -1
             lev = 5
-        # 聚类3：涨 如果价差为正且AI方向为做多，信心大于0.51，5倍做多
+        # 聚类3：涨 如果价差为正且AI方向为做多，信心大于特定值，5倍做多
         elif cluster_id == 3 and price_pred_diff > 0 and ai_dir == 1 and ai_conf > 0.51:
             sig = 1
             lev = 5
-        # 聚类4：由暴跌转暴涨 如果上一聚类非4且价差为正且AI方向为做多，信心大于0.51，5倍做多
+        # 聚类4：由暴跌转暴涨 如果上一聚类非4且价差为正且AI方向为做多，信心大于特定值，5倍做多
         elif cluster_id == 4 and self.last_cluster != 4 and price_pred_diff > 0 and ai_dir == 1 and ai_conf > 0.51:
             sig = 1
             lev = 5
