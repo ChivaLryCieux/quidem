@@ -77,12 +77,6 @@ class RiskManager:
                 if raw_pnl_pct > 0:
                     return True, f"🏃 Bailout(Flip{flips_count},AnyProfit)"
 
-        # 4. 持仓15分钟后仍未平仓，则判定新的15步价差
-        if duration_min >= 15:
-            # 这里需要传入新的价差信息，但由于函数签名限制，我们在外部处理这部分逻辑
-            # 返回特殊标记，表示需要进一步检查
-            return "CHECK_PRICE_DIFF", f"⏱️ 15minCheck({int(duration_min)}m)"
-
         # 5. 若启用风险管理类，则按类的内容止损，若未启用，爆仓才止损
         # 这部分已经在基础止损止盈检查中处理
 

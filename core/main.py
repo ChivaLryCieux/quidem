@@ -228,7 +228,7 @@ class QuantBot:
                 side = 'buy' if sig == 1 else 'sell'
                 # 交易执行仍然走 REST API
                 if self.exchange.execute_order(side, amount):
-                    # 设置止盈止损，使用新的平仓判定逻辑
+                    # 设置止盈止损平仓判定逻辑
                     self.position = {
                         'size': amount if sig == 1 else -amount,
                         'entry_price': price,
