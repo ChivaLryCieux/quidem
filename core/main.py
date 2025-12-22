@@ -205,28 +205,6 @@ class QuantBot:
             pos, curr_price, time.time() * 1000, self.profit_flip_count, atr, self.balance
         )
 
-        # 处理特殊返回值：需要检查价差
-        if should_exit == "CHECK_PRICE_DIFF":
-            # 持仓15分钟后仍未平仓，则判定新的15步价差
-            # 若依然大于/小于最小止盈距离（和开仓方向一致），则继续持仓
-            # 否则，若有盈利则立即平仓，若亏损，依然继续持仓
-            direction = 1 if pos['size'] > 0 else -1
-            
-            # 检查价差是否与开仓方向一致且大于最小止盈距离
-            if direction == 1 and price_pred_diff > Config.MIN_TP_DISTANCE:
-                # 做多且价差为正且大于最小止盈距离，继续持仓
-                should_exit = False
-            elif direction == -1 and price_pred_diff < -Config.MIN_TP_DISTANCE:
-                # 做空且价差为负且小于负最小止盈距离，继续持仓
-                should_exit = False
-            else:
-                # 价差不满足条件，若有盈利则立即平仓，若亏损，依然继续持仓
-                if raw_pnl_pct > 0:
-                    should_exit = True
-                    reason = f"💰 PriceDiffChanged({price_pred_diff:.4f})"
-                else:
-                    should_exit = False
-
         if should_exit:
             self._execute_exit(reason, curr_price, funding_rate)
 
