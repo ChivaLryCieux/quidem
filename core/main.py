@@ -73,17 +73,24 @@ class QuantBot:
         initial_ohlcv_15m = initial_data['15m']
 
         if initial_ohlcv_1m and initial_ohlcv_15m:
-            # 处理1分钟数据
+            # 处理1分钟数据（只用于预测，不训练）
             for candle in initial_ohlcv_1m:
                 self.brain.ingest_candle(candle, '1m')
-                res = self.brain.analyze()
-                if res:
-                    label = 1 if float(candle[4]) - float(candle[1]) > 0 else -1
-                    self.brain.train_ai(res['features'], label)
 
-            # 处理15分钟数据
+            # 处理15分钟数据（用于训练）
             for candle in initial_ohlcv_15m:
                 self.brain.ingest_candle(candle, '15m')
+                res = self.brain.analyze()
+                if res:
+                    # 三分类标签规则：基于绝对止盈距离
+                    price_diff = float(candle[4]) - float(candle[1])
+                    if price_diff > Config.MIN_TP_DISTANCE:
+                        label = 1  # 看涨
+                    elif price_diff < -Config.MIN_TP_DISTANCE:
+                        label = -1  # 看跌
+                    else:
+                        label = 0  # 中性
+                    self.brain.train_ai(res['features'], label)
 
             # 设置最近一根收盘K线的时间
             self.last_candle_closed_time = initial_ohlcv_1m[-2][0]

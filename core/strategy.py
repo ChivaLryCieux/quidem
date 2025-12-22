@@ -206,7 +206,19 @@ class RandomForestClassifier:
         x = {f"f{i}": v for i, v in enumerate(features.flatten())}
         probs = self.rf_model.predict_proba_one(x)
         if not probs: return 0, 0.0
-        return (1, probs.get(1, 0.0)) if probs.get(1, 0.0) > probs.get(-1, 0.0) else (-1, probs.get(-1, 0.0))
+        
+        # 三分类预测：检查最高概率的类别
+        prob_1 = probs.get(1, 0.0)
+        prob_minus1 = probs.get(-1, 0.0)
+        prob_0 = probs.get(0, 0.0)
+        
+        # 找到最高概率的类别
+        if prob_1 >= prob_minus1 and prob_1 >= prob_0:
+            return 1, prob_1
+        elif prob_minus1 >= prob_1 and prob_minus1 >= prob_0:
+            return -1, prob_minus1
+        else:
+            return 0, prob_0
 
 
 # ==========================================
@@ -370,17 +382,21 @@ class StateMachine:
                     match_reason = f"簇{cluster_id}看跌 + AI看跌(信心{ai_conf:.2f})"
                 else:
                     print(f"⛔ 信号阻断: 簇{cluster_id}方向匹配但信心不足 ({ai_conf:.3f} <= {target_conf})")
+            elif ai_dir == 0:
+                print(f"⛔ 信号阻断: 簇{cluster_id}看跌 但 AI中性 (无明确方向)")
             else:
                 print(f"⛔ 信号阻断: 簇{cluster_id}看跌 但 AI看涨 (方向冲突)")
 
-        # 簇1 - 完全依靠随机森林预测 (开多还是开空全靠AI)
+        # 簇1 - 完全依靠随机森林预测 (开多还是开空全靠AI，中性时不交易)
         elif cluster_id == 1:
-            if ai_conf > target_conf:
+            if ai_dir != 0 and ai_conf > target_conf:
                 sig = ai_dir
                 lev = 5
                 is_signal = True
                 ai_direction_text = "看涨" if ai_dir == 1 else "看跌"
                 match_reason = f"簇1完全依赖AI预测 → AI{ai_direction_text}(信心{ai_conf:.2f})"
+            elif ai_dir == 0:
+                print(f"⛔ 信号阻断: 簇1 AI预测中性，不交易")
             else:
                 print(f"⛔ 信号阻断: 簇1 AI预测信心不足 ({ai_conf:.3f} <= {target_conf})")
 
@@ -394,6 +410,8 @@ class StateMachine:
                     match_reason = f"簇{cluster_id}看涨 + AI看涨(信心{ai_conf:.2f})"
                 else:
                     print(f"⛔ 信号阻断: 簇{cluster_id}方向匹配但信心不足 ({ai_conf:.3f} <= {target_conf})")
+            elif ai_dir == 0:
+                print(f"⛔ 信号阻断: 簇{cluster_id}看涨 但 AI中性 (无明确方向)")
             else:
                 print(f"⛔ 信号阻断: 簇{cluster_id}看涨 但 AI看跌 (方向冲突)")
 
