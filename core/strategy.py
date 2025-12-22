@@ -360,8 +360,8 @@ class StateMachine:
         match_reason = ""
         is_signal = False
 
-        # 聚类0, 1, 2 (做空组)
-        if cluster_id in [0, 1, 2]:
+        # 簇0, 2 (做空组) - 强制看跌方向
+        if cluster_id in [0, 2]:
             if ai_dir == -1:
                 if ai_conf > target_conf:
                     sig = -1
@@ -373,7 +373,18 @@ class StateMachine:
             else:
                 print(f"⛔ 信号阻断: 簇{cluster_id}看跌 但 AI看涨 (方向冲突)")
 
-        # 聚类3, 4 (做多组)
+        # 簇1 - 完全依靠随机森林预测 (开多还是开空全靠AI)
+        elif cluster_id == 1:
+            if ai_conf > target_conf:
+                sig = ai_dir
+                lev = 5
+                is_signal = True
+                ai_direction_text = "看涨" if ai_dir == 1 else "看跌"
+                match_reason = f"簇1完全依赖AI预测 → AI{ai_direction_text}(信心{ai_conf:.2f})"
+            else:
+                print(f"⛔ 信号阻断: 簇1 AI预测信心不足 ({ai_conf:.3f} <= {target_conf})")
+
+        # 簇3, 4 (做多组)
         elif cluster_id in [3, 4]:
             if ai_dir == 1:
                 if ai_conf > target_conf:
