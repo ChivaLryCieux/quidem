@@ -291,88 +291,103 @@ class StateMachine:
 
     def get_entry_signal(self, analysis_data, current_price):
         """
-        根据新的状态机判定机制计算交易信号
-        返回: (signal, leverage)
-        signal: 1 (Buy), -1 (Sell), 0 (None)
+        [调试版] 根据新的状态机判定机制计算交易信号
         """
-        # 获取订单簿分析（如果已计算则使用已有值，否则计算）
+        # --- 调试：检查输入数据完整性 ---
+        if not analysis_data:
+            print(f"DEBUG: analysis_data 为空")
+            return 0, Config.MIN_LEVERAGE
+
+        # 获取订单簿分析
         if 'obi' in analysis_data and 'spread_pct' in analysis_data:
             obi = analysis_data['obi']
             spread_pct = analysis_data['spread_pct']
         else:
             obi, spread_pct = self.ob_analyzer.analyze(analysis_data.get('orderbook', {}))
-        
+
         features = analysis_data['features']
         ai_dir, ai_conf = analysis_data['ai_prediction']
-        
+
         # 获取价格预测差值
         price_pred_diff = analysis_data.get('price_prediction_diff', 0.0)
 
         sig = 0
         lev = Config.MIN_LEVERAGE
-        regime = self.state
+
+        # --- 调试：打印关键指标 ---
+        # print(f"DEBUG: AI方向={ai_dir}, 信心={ai_conf:.4f}, OBI={obi:.4f}, Spread={spread_pct:.5f}")
 
         # 1. 基础过滤 (Spread & ATR)
         if spread_pct > Config.MAX_SPREAD_PCT:
-            return 0, lev
-        if analysis_data['atr'] < current_price * Config.MIN_ATR_PCT:
+            print(f"⛔ 信号阻断: 价差过大 ({spread_pct:.5f} > {Config.MAX_SPREAD_PCT})")
             return 0, lev
 
-        # 1. 硬阈值过滤器
-        # 如果价差范围在负最小止盈距离和正最小止盈距离之间，不开仓
-        # if -Config.MIN_TP_DISTANCE <= price_pred_diff <= Config.MIN_TP_DISTANCE:
+        # ATR 存在恶性问题，待解决
+        # min_atr = current_price * Config.MIN_ATR_PCT
+        # if analysis_data['atr'] < min_atr:
+            #     print(f"⛔ 信号阻断: 波动率不足 (ATR {analysis_data['atr']:.2f} < {min_atr:.2f})")
         #     return 0, lev
 
         # 2. 聚类分析器
-        # 获取当前聚类
         current_cluster_data = analysis_data.get('cluster', (5, 0.0))
         cluster_id = current_cluster_data[0]
         cluster_distance = current_cluster_data[1]
-        
+
+        # --- 调试：聚类状态 ---
+        if cluster_id == 5:
+            # 检查是否是因为特征缺失导致一直卡在5
+            mom_vals = analysis_data.get('momentum_values', {})
+            if not mom_vals or mom_vals.get('T_50') == 0:
+                print(f"⛔ 信号阻断: 聚类特征未就绪 (Cluster 5). 动量数据: {len(mom_vals)}个")
+            else:
+                print(f"⛔ 信号阻断: 聚类结果为 5 (无效/等待)")
+            return 0, lev
+
         # 状态机逻辑：管理簇5到正常簇的转换
         if self.last_cluster == 5:
-            if cluster_id == 5:
-                print(f"初始状态: 等待首次聚类分析...")
-                return 0, lev
-            else:
-                print(f" 🔄 聚类初始化: 簇5 → 簇{cluster_id} (距离: {cluster_distance:.4f})")
-                self.last_cluster = cluster_id
-        else:
-            if cluster_id == 5:
-                print(f" ⚠️  聚类异常返回簇5，保持上次聚类簇{self.last_cluster}")
-                cluster_id = self.last_cluster
-            elif cluster_id != self.last_cluster:
-                print(f" 🔄 聚类变化: 簇{self.last_cluster} → 簇{cluster_id} (距离: {cluster_distance:.4f})")
-                self.last_cluster = cluster_id
-            else:
-                print(f"聚类稳定: 保持在簇{cluster_id}")
-        
-        print(f"当前状态: Cluster={cluster_id}, Last={self.last_cluster}, Distance={cluster_distance:.4f}")
-            
-        # 聚类0 跌：如果价差为负且AI方向为做空，信心大于特定值，5倍做空
-        if cluster_id == 0 and ai_dir == -1 and ai_conf > 0.51:
-            sig = -1
-            lev = 5
-        # 聚类1 跌+平：如果价差为负且AI方向为做空，信心大于特定值，5倍做空
-        elif cluster_id == 1 and ai_dir == -1 and ai_conf > 0.51:
-            sig = -1
-            lev = 5
-        # 聚类2 暴跌：如果价差为负且AI方向为做空，信心大于特定值，5倍做空
-        elif cluster_id == 2 and ai_dir == -1 and ai_conf > 0.51:
-            sig = -1
-            lev = 5
-        # 聚类3：涨 如果价差为正且AI方向为做多，信心大于特定值，5倍做多
-        elif cluster_id == 3 and ai_dir == 1 and ai_conf > 0.51:
-            sig = 1
-            lev = 5
-        # 聚类4：由暴跌转暴涨 如果价差为正且AI方向为做多，信心大于特定值，5倍做多
-        elif cluster_id == 4 and ai_dir == 1 and ai_conf > 0.51:
-            sig = 1
-            lev = 5
-        
-        # 更新上一聚类记录器
-        if sig != 0:
+            print(f" 🔄 聚类初始化: 簇5 → 簇{cluster_id}")
             self.last_cluster = cluster_id
+            # 初始化转换时不交易，或者您可以选择交易
+            return 0, lev
+        else:
+            if cluster_id != self.last_cluster:
+                print(f" 🔄 聚类变化: 簇{self.last_cluster} → 簇{cluster_id}")
+                self.last_cluster = cluster_id
+
+        # 3. 信号匹配逻辑 (核心阻断点)
+        target_conf = 0.51
+
+        match_reason = ""
+        is_signal = False
+
+        # 聚类0, 1, 2 (做空组)
+        if cluster_id in [0, 1, 2]:
+            if ai_dir == -1:
+                if ai_conf > target_conf:
+                    sig = -1
+                    lev = 5
+                    is_signal = True
+                    match_reason = f"簇{cluster_id}看跌 + AI看跌(信心{ai_conf:.2f})"
+                else:
+                    print(f"⛔ 信号阻断: 簇{cluster_id}方向匹配但信心不足 ({ai_conf:.3f} <= {target_conf})")
+            else:
+                print(f"⛔ 信号阻断: 簇{cluster_id}看跌 但 AI看涨 (方向冲突)")
+
+        # 聚类3, 4 (做多组)
+        elif cluster_id in [3, 4]:
+            if ai_dir == 1:
+                if ai_conf > target_conf:
+                    sig = 1
+                    lev = 5
+                    is_signal = True
+                    match_reason = f"簇{cluster_id}看涨 + AI看涨(信心{ai_conf:.2f})"
+                else:
+                    print(f"⛔ 信号阻断: 簇{cluster_id}方向匹配但信心不足 ({ai_conf:.3f} <= {target_conf})")
+            else:
+                print(f"⛔ 信号阻断: 簇{cluster_id}看涨 但 AI看跌 (方向冲突)")
+
+        if is_signal:
+            print(f"✅ 信号生成: {match_reason}")
 
         return sig, lev
 
