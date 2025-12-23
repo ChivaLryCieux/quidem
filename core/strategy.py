@@ -5,7 +5,7 @@ from river.forest import ARFClassifier as AdaptiveRandomForestClassifier
 from colorama import Fore
 
 from config import Config
-from math_tools import MathUtils, HInfinityFilter1D, OnlineEGARCH, WaveletAnalyzer, MomentumCalculator, RealizedVolatilityCalculator
+from math_tools import MathUtils, HInfinityFilter1D, OnlineEGARCH, WaveletAnalyzer, MomentumCalculator, RealizedVolatilityCalculator, FractalAnalysis, OnlineBOCPD
 
 
 # ==========================================
@@ -41,6 +41,9 @@ class RandomForestClassifier:
         self.egarch, self.wavelet = OnlineEGARCH(), WaveletAnalyzer()
         self.momentum_calc = MomentumCalculator()
         self.volatility_calc = RealizedVolatilityCalculator()
+        # 实例化FractalAnalysis和OnlineBOCPD
+        self.fractal_analysis = FractalAnalysis(window_size=30)
+        self.bocpd = OnlineBOCPD(hazard=1/100, max_lags=200)
         self.rf_model = compose.Pipeline(
             preprocessing.StandardScaler(),
             AdaptiveRandomForestClassifier(n_models=10, seed=42)
@@ -80,6 +83,10 @@ class RandomForestClassifier:
             
             # 更新波动率计算器
             self.volatility_calc.update(curr_price)
+            
+            # 更新FractalAnalysis和OnlineBOCPD
+            self.fractal_analysis.update(curr_price)
+            self.bocpd.update(curr_price)
             
         elif timeframe == '15m':
             if self.history_15m.empty:
@@ -140,6 +147,10 @@ class RandomForestClassifier:
         vol_25 = volatilities.get('T_25', 0.0) if volatilities.get('T_25') is not None else 0.0
         vol_50 = volatilities.get('T_50', 0.0) if volatilities.get('T_50') is not None else 0.0
 
+        # 获取Hurst指数和变点概率
+        hurst_exponent = self.fractal_analysis.update(curr_price)
+        change_point_prob = self.bocpd.update(curr_price)
+
         features = np.array([
             hf_diff,
             eg_vol * 1000,
@@ -156,7 +167,9 @@ class RandomForestClassifier:
             vol_10,
             vol_25,
             vol_50,
-            self.price_prediction_diff  # 价格预测差值
+            self.price_prediction_diff,  # 价格预测差值
+            hurst_exponent,  # Hurst指数 - 分形分析特征
+            change_point_prob  # 变点概率 - 贝叶斯变点检测
         ]).reshape(1, -1)
 
         return {
@@ -166,7 +179,9 @@ class RandomForestClassifier:
             'vol_5': vol_5, 'vol_10': vol_10, 'vol_25': vol_25, 'vol_50': vol_50,
             'range_pct': range_pct, 'price_prediction_diff': self.price_prediction_diff,
             'momentum_values': momentums,  # 添加完整的动量字典
-            'volatility_values': volatilities  # 添加完整的波动率字典
+            'volatility_values': volatilities,  # 添加完整的波动率字典
+            'hurst_exponent': hurst_exponent,  # Hurst指数特征
+            'change_point_prob': change_point_prob  # 变点概率特征
         }
 
     def _update_price_prediction_diff(self):
@@ -367,7 +382,7 @@ class StateMachine:
                 self.last_cluster = cluster_id
 
         # 3. 信号匹配逻辑 (核心阻断点)
-        target_conf = 0.51
+        target_conf = 0.4
 
         match_reason = ""
         is_signal = False

@@ -60,6 +60,46 @@ class OnlineEGARCH:
         return math.sqrt(math.exp(self.log_var))
 
 
+class FractalAnalysis:
+    def __init__(self, window_size=30):
+        self.window, self.data_buffer = window_size, []
+
+    def update(self, price):
+        self.data_buffer.append(price)
+        if len(self.data_buffer) > self.window: self.data_buffer.pop(0)
+        if len(self.data_buffer) < self.window: return 0.5
+        rets = np.diff(np.log(np.array(self.data_buffer)))
+        if len(rets) < 2 or np.std(rets) == 0: return 0.5
+        rs = (np.max(np.cumsum(rets - np.mean(rets))) - np.min(np.cumsum(rets - np.mean(rets)))) / (np.std(rets) + 1e-9)
+        return max(0.0, min(1.0, np.log(rs) / np.log(len(rets))))
+
+
+class OnlineBOCPD:
+    def __init__(self, hazard=1 / 100, max_lags=200):
+        self.hazard, self.max_lags = hazard, max_lags
+        self.R, self.alpha, self.beta, self.kappa, self.mu = np.array([1.0]), np.array([1.0]), np.array(
+            [1e-4]), np.array([1.0]), np.array([0.0])
+
+    def update(self, x):
+        x = float(x)
+        scale = np.sqrt(self.beta * (self.kappa + 1) / (self.alpha * self.kappa))
+        pred_probs = student_t.pdf(x, 2 * self.alpha, loc=self.mu, scale=scale)
+        growth_probs = pred_probs * self.R * (1 - self.hazard)
+        cp_prob = np.sum(pred_probs * self.R * self.hazard)
+        new_R = np.append(cp_prob, growth_probs)
+        new_R /= np.sum(new_R) + 1e-12
+        if len(new_R) > self.max_lags: new_R = new_R[:self.max_lags]; new_R /= np.sum(new_R) + 1e-12
+        self.R = new_R
+        new_alpha = np.append(1.0, self.alpha + 0.5)
+        new_kappa = np.append(1.0, self.kappa + 1)
+        new_mu = np.append(0.0, (self.kappa * self.mu + x) / (self.kappa + 1))
+        new_beta = np.append(1e-4, self.beta + (self.kappa * (x - self.mu) ** 2) / (2 * (self.kappa + 1)))
+        limit = len(self.R)
+        self.alpha, self.kappa, self.mu, self.beta = new_alpha[:limit], new_kappa[:limit], new_mu[:limit], new_beta[
+            :limit]
+        return self.R[0]
+
+
 class WaveletAnalyzer:
     def __init__(self, wavelet='sym5', level=2):
         self.wavelet, self.level = wavelet, level
