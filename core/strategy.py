@@ -44,6 +44,7 @@ class RandomForestClassifier:
         # 实例化FractalAnalysis和OnlineBOCPD
         self.fractal_analysis = FractalAnalysis(window_size=30)
         self.bocpd = OnlineBOCPD(hazard=1/100, max_lags=200)
+        self.atr_15m_last = 0.0  # ATR缓存：仅在15m K线更新时计算一次，供训练与风控使用
         self.rf_model = compose.Pipeline(
             preprocessing.StandardScaler(),
             AdaptiveRandomForestClassifier(n_models=10, seed=42)
@@ -99,7 +100,7 @@ class RandomForestClassifier:
                 elif item[0] > self.history_15m.iloc[-1]['timestamp']:
                     self.history_15m = pd.concat([self.history_15m, row], ignore_index=True)
 
-            self.history_15m = self.history_15m.iloc[-100:]  # 保持滑动窗口
+            self.history_15m = self.history_15m.iloc[-100:]  # 保持滑动窗口 # 仅保留最近100根15mK线，降低ATR计算成本
             
             # 更新15分钟H无穷滤波器和价格历史
             self.hf_predictor_15m.update(curr_price)
@@ -109,6 +110,13 @@ class RandomForestClassifier:
             
             # 更新价格预测差值
             self._update_price_prediction_diff()
+            
+            # 更新15m ATR缓存（降低计算频率，避免在1m循环中反复计算）
+            try:
+                if len(self.history_15m) >= 15:
+                    self.atr_15m_last = float(MathUtils.calc_atr(self.history_15m.iloc[-30:]).iloc[-1])  # 使用最近30根计算ATR并缓存
+            except Exception:
+                self.atr_15m_last = 0.0  # 异常时重置ATR缓存
 
     def extract_features(self):
         df = self.history
@@ -344,8 +352,8 @@ class StateMachine:
         # --- 调试：打印关键指标 ---
         # print(f"DEBUG: AI方向={ai_dir}, 信心={ai_conf:.4f}, OBI={obi:.4f}, Spread={spread_pct:.5f}")
 
-        # 1. 基础过滤 (Spread & ATR)
-        if spread_pct > Config.MAX_SPREAD_PCT:
+        # 1. 基础过滤 (Spread & ATR)；回测模式下跳过价差过滤（订单簿数据可能缺失）
+        if (not getattr(Config, "BACKTEST_MODE", False)) and spread_pct > Config.MAX_SPREAD_PCT:
             print(f"⛔ 信号阻断: 价差过大 ({spread_pct:.5f} > {Config.MAX_SPREAD_PCT})")
             return 0, lev
 
