@@ -19,7 +19,7 @@ os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7890"
 REDIS_HOST = 'localhost'
 RESEND_API_KEY = "re_39zFrC4s_KhUDNyHg8ZFRR8LkXg8cN8Ry"  # 你的 Key
 MAIL_FROM = "XRP量化基金 <report@abyssalfish.top>"
-MAIL_TO = ["3433551710@qq.com", "2874575651@qq.com"]
+MAIL_TO = ["3433551710@qq.com", "2874575651@qq.com","2129325064@qq.com"]
 
 # 自动处理路径
 ARCHIVE_DIR = os.path.expanduser("~/quant_archive")
