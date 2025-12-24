@@ -43,6 +43,10 @@ class Config:
     OBI_THRESHOLD_TREND = -0.2
     OBI_THRESHOLD_BREAKOUT = 0.1
     MAX_SPREAD_PCT = 0.001
+    LABEL_ATR_MULT = 0.5  # 训练与标签阈值：ATR倍数，用于决定涨跌标签门槛
+    BACKTEST_MODE = True  # 回测模式开关：True 时跳过依赖订单簿的过滤（避免OBI真空抑制信号）
+    FUNDING_EVENT_INTERVAL_HOURS = 8  # 资金费率结算间隔（小时），回测按此周期触发结算事件
+    BACKTEST_FUNDING_RATE_PCT = 0.0000  # 回测资金费率（百分比），正数对多仓扣费、对空仓加费；负数相反
 
     #邮件报告开关
     ENABLE_MAIL_REPORT =False
