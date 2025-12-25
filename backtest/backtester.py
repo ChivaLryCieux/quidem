@@ -32,11 +32,36 @@ def _make_exchange(use_proxy=True):
         raise
 
 def _fetch_ohlcv(exchange, symbol, timeframe, limit, since=None):
-    try:
-        return exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
-    except Exception:
-        ex2 = _make_exchange(False)
-        return ex2.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
+    all_ohlcv = []
+    remaining = limit
+    batch_count = 0
+    
+    while remaining > 0:
+        batch_size = min(remaining, 1000)
+        try:
+            batch = exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=batch_size)
+        except Exception:
+            ex2 = _make_exchange(False)
+            batch = ex2.fetch_ohlcv(symbol, timeframe, since=since, limit=batch_size)
+        
+        if not batch:
+            print(f"  [{symbol}/{timeframe}] 第{batch_count+1}批: 无数据返回，停止拉取")
+            break
+        
+        all_ohlcv.extend(batch)
+        batch_count += 1
+        remaining -= len(batch)
+        
+        print(f"  [{symbol}/{timeframe}] 第{batch_count}批: 获取{len(batch)}根, 累计{len(all_ohlcv)}根, 剩余需{remaining}根")
+        
+        if len(batch) < batch_size:
+            print(f"  [{symbol}/{timeframe}] 返回数据少于请求，已到历史边界")
+            break
+        
+        since = batch[0][0] - 1
+    
+    all_ohlcv.sort(key=lambda x: x[0])
+    return all_ohlcv
 
 class StrategyBacktesterUnified:
     def __init__(self, symbol=None, balance=100.0, since_ms=None, end_ms=None, timeformat="%H:%M", warmup_steps=30):
@@ -179,14 +204,17 @@ class StrategyBacktesterUnified:
                 return True
         return False
 
-    def run(self, limit_1m=500, limit_15m=150):
+    # k线拉取数量在此调整，一年约有50万分钟（500000）
+    def run(self, limit_1m=50000, limit_15m=3334):
         print(f"开始回测: {self.symbol} 滑点: {self.slippage*10000:.1f}bps")
         ex = _make_exchange(True)
         data_1m = _fetch_ohlcv(ex, self.symbol, '1m', limit_1m, since=self.since_ms)
         data_15m = _fetch_ohlcv(ex, self.symbol, '15m', limit_15m, since=self.since_ms)
+        print(f"实际获取: 1m={len(data_1m)}根, 15m={len(data_15m)}根")
         if self.end_ms:
             data_1m = [c for c in data_1m if c[0] <= self.end_ms]
             data_15m = [c for c in data_15m if c[0] <= self.end_ms]
+            print(f"时间过滤后: 1m={len(data_1m)}根, 15m={len(data_15m)}根")
         self.data_1m_cache = data_1m
         idx_15 = 0
         processed_count = 0
@@ -195,13 +223,6 @@ class StrategyBacktesterUnified:
             while idx_15 < len(data_15m) and data_15m[idx_15][0] <= c1[0]:
                 c15 = data_15m[idx_15]
                 self.brain.ingest_candle(c15, '15m')
-                res15 = self.brain.analyze()
-                if res15:
-                    atr_val = getattr(self.brain.rf_classifier, "atr_15m_last", 0.0)
-                    diff = float(c15[4]) - float(c15[1])
-                    th = atr_val * getattr(Config, "LABEL_ATR_MULT", 0.5) if atr_val > 0 else float(Config.MIN_TP_DISTANCE)
-                    label = 1 if diff > th else (-1 if diff < -th else 0)
-                    self.brain.train_ai(res15['features'], label)
                 idx_15 += 1
             self.brain.ingest_candle(c1, '1m')
             analysis = self.brain.analyze()
@@ -210,6 +231,14 @@ class StrategyBacktesterUnified:
             processed_count += 1
             if processed_count < self.warmup_steps:
                 continue
+            price_diff = float(c1[4]) - float(c1[1])
+            if price_diff > Config.MIN_TP_DISTANCE * 0.2:
+                label = 1
+            elif price_diff < -Config.MIN_TP_DISTANCE * 0.2:
+                label = -1
+            else:
+                label = 0
+            self.brain.train_ai(analysis['features'], label)
             if self._intrabar_exit(c1, current_time_ms):
                 continue
             price = float(c1[4])
@@ -268,6 +297,15 @@ class StrategyBacktesterUnified:
     def _plot(self, balances):
         ts = [datetime.fromtimestamp(c[0] / 1000.0) for c in self.data_1m_cache]
         px = [float(c[4]) for c in self.data_1m_cache]
+        
+        time_span_days = (ts[-1] - ts[0]).days if len(ts) > 1 else 0
+        if time_span_days > 7:
+            timeformat = "%m-%d"
+        elif time_span_days > 1:
+            timeformat = "%m-%d %H:%M"
+        else:
+            timeformat = "%H:%M"
+        
         fig = plt.figure(figsize=(12, 6))
         ax1 = plt.subplot(2, 1, 1)
         ax1.plot(ts, px, color="gray", linewidth=1)
@@ -285,7 +323,7 @@ class StrategyBacktesterUnified:
             ax1.axvline(et, color="green", alpha=0.15, linewidth=0.8)
             ax1.axvline(xt, color="red", alpha=0.15, linewidth=0.8)
         ax1.set_title("价格与交易标记")
-        ax1.xaxis.set_major_formatter(mdates.DateFormatter(self.timeformat))
+        ax1.xaxis.set_major_formatter(mdates.DateFormatter(timeformat))
         if len(ts) > 0:
             ax1.set_xlim(ts[0], ts[-1])
         legend_handles = [
@@ -306,7 +344,7 @@ class StrategyBacktesterUnified:
         if len(eq_times) > 0:
             ax2.scatter(eq_times, eq_vals, color="#007bff", s=20)
         ax2.set_title("权益曲线")
-        ax2.xaxis.set_major_formatter(mdates.DateFormatter(self.timeformat))
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter(timeformat))
         if len(ts) > 0:
             ax2.set_xlim(ts[0], ts[-1])
         legend_handles2 = [
@@ -325,8 +363,8 @@ if __name__ == "__main__":
     parser.add_argument("--symbol", type=str, default=Config.SYMBOL)
     parser.add_argument("--balance", type=float, default=100.0)
     parser.add_argument("--slippage", type=float, default=getattr(Config, "SLIPPAGE_BPS", 0.0002))
-    parser.add_argument("--limit-1m", type=int, default=500)
-    parser.add_argument("--limit-15m", type=int, default=150)
+    parser.add_argument("--limit-1m", type=int, default=50000)
+    parser.add_argument("--limit-15m", type=int, default=3334)
     parser.add_argument("--save", type=str, default="")
     parser.add_argument("--since-ms", type=int, default=0)
     parser.add_argument("--end-ms", type=int, default=0)

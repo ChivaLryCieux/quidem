@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import os
+import sys
 from river import compose, preprocessing
 from river.forest import ARFClassifier as AdaptiveRandomForestClassifier
 from colorama import Fore
@@ -251,16 +253,36 @@ class KMeansClusterAnalyzer:
     def __init__(self, n_clusters=5):
         self.n_clusters = n_clusters
         self.feature_names = ['mom_5', 'mom_10', 'mom_25', 'mom_50', 'vol_5', 'vol_10', 'vol_25', 'vol_50']
-        # 预定义的质心，每个质心包含8个特征（4个动量+4个波动率）
-        self.centroids = {
-            0: [-0.0077, -0.0136, -0.0246, -0.0321, 0.0048, 0.0048, 0.0048, 0.0045],  # 簇0的质心：[mom_5, mom_10, mom_25, mom_50, vol_5, vol_10, vol_25, vol_50]
-            1: [-0.0005, -0.0007, -0.0007, -0.0004, 0.0022, 0.0023, 0.0026, 0.0028],  # 簇1的质心
-            2: [-0.0625, -0.1557, -0.1866, -0.2102, 0.0709, 0.0770, 0.0484, 0.0342],  # 簇2的质心
-            3: [0.0074, 0.0121, 0.0193, 0.0219, 0.0042, 0.0044, 0.0043, 0.0043],  # 簇3的质心
-            4: [0.0628, 0.1556, 0.1866, 0.2102, 0.0708, 0.0769, 0.0484, 0.0342]   # 簇4的质心
-        }
-        self.is_initialized = False  # 标记是否已经进行过有效聚类
-        self.last_valid_cluster = 5  # 初始状态为簇5
+        
+        centroids_path = os.path.join(os.path.dirname(__file__), 'centroids.csv')
+        if not os.path.exists(centroids_path):
+            print(f"错误: 未找到 centroids.csv 文件: {centroids_path}")
+            sys.exit(1)
+        
+        try:
+            centroids_df = pd.read_csv(centroids_path, index_col=0)
+            self.centroids = {}
+            
+            for cluster_id in range(len(centroids_df)):
+                row = centroids_df.iloc[cluster_id]
+                centroid = [
+                    row['log_mom_5'],
+                    row['log_mom_10'],
+                    row['log_mom_25'],
+                    row['log_mom_50'],
+                    row['vol_5'],
+                    row['vol_10'],
+                    row['vol_25'],
+                    row['vol_50']
+                ]
+                self.centroids[cluster_id] = centroid
+            print(f"成功从 {centroids_path} 加载 {len(self.centroids)} 个聚类质心")
+        except Exception as e:
+            print(f"错误: 加载 centroids.csv 失败: {e}")
+            sys.exit(1)
+        
+        self.is_initialized = False
+        self.last_valid_cluster = 5
         self.initialized = True
         
     def predict_cluster(self, momentum_values, volatility_values):
@@ -395,48 +417,70 @@ class StateMachine:
         match_reason = ""
         is_signal = False
 
-        # 簇0, 2 (做空组) - 强制看跌方向
-        if cluster_id in [0, 2]:
-            if ai_dir == -1:
-                if ai_conf > target_conf:
-                    sig = -1
-                    lev = 5
-                    is_signal = True
-                    match_reason = f"簇{cluster_id}看跌 + AI看跌(信心{ai_conf:.2f})"
-                else:
-                    print(f"⛔ 信号阻断: 簇{cluster_id}方向匹配但信心不足 ({ai_conf:.3f} <= {target_conf})")
-            elif ai_dir == 0:
-                print(f"⛔ 信号阻断: 簇{cluster_id}看跌 但 AI中性 (无明确方向)")
-            else:
-                print(f"⛔ 信号阻断: 簇{cluster_id}看跌 但 AI看涨 (方向冲突)")
-
-        # 簇1 - 完全依靠随机森林预测 (开多还是开空全靠AI，中性时不交易)
-        elif cluster_id == 1:
+        # 簇0：波动，完全依靠ai信号开仓
+        if cluster_id == 0:
             if ai_dir != 0 and ai_conf > target_conf:
                 sig = ai_dir
                 lev = 5
                 is_signal = True
                 ai_direction_text = "看涨" if ai_dir == 1 else "看跌"
-                match_reason = f"簇1完全依赖AI预测 → AI{ai_direction_text}(信心{ai_conf:.2f})"
+                match_reason = f"簇0波动 + AI{ai_direction_text}(信心{ai_conf:.2f})"
             elif ai_dir == 0:
-                print(f"⛔ 信号阻断: 簇1 AI预测中性，不交易")
+                print(f"⛔ 信号阻断: 簇0 AI预测中性，不交易")
+            else:
+                print(f"⛔ 信号阻断: 簇0 AI预测信心不足 ({ai_conf:.3f} <= {target_conf})")
+
+        # 簇1：涨，只做多，配合ai信号
+        elif cluster_id == 1:
+            if ai_dir == 1 and ai_conf > target_conf:
+                sig = 1
+                lev = 5
+                is_signal = True
+                match_reason = f"簇1涨 + AI看涨(信心{ai_conf:.2f})"
+            elif ai_dir != 1:
+                ai_direction_text = "看跌" if ai_dir == -1 else "中性"
+                print(f"⛔ 信号阻断: 簇1只做多 但 AI{ai_direction_text} (方向冲突)")
             else:
                 print(f"⛔ 信号阻断: 簇1 AI预测信心不足 ({ai_conf:.3f} <= {target_conf})")
 
-        # 簇3, 4 (做多组)
-        elif cluster_id in [3, 4]:
-            if ai_dir == 1:
-                if ai_conf > target_conf:
-                    sig = 1
-                    lev = 5
-                    is_signal = True
-                    match_reason = f"簇{cluster_id}看涨 + AI看涨(信心{ai_conf:.2f})"
-                else:
-                    print(f"⛔ 信号阻断: 簇{cluster_id}方向匹配但信心不足 ({ai_conf:.3f} <= {target_conf})")
-            elif ai_dir == 0:
-                print(f"⛔ 信号阻断: 簇{cluster_id}看涨 但 AI中性 (无明确方向)")
+        # 簇2：大跌，只做空，配合ai信号
+        elif cluster_id == 2:
+            if ai_dir == -1 and ai_conf > target_conf:
+                sig = -1
+                lev = 5
+                is_signal = True
+                match_reason = f"簇2大跌 + AI看跌(信心{ai_conf:.2f})"
+            elif ai_dir != -1:
+                ai_direction_text = "看涨" if ai_dir == 1 else "中性"
+                print(f"⛔ 信号阻断: 簇2只做空 但 AI{ai_direction_text} (方向冲突)")
             else:
-                print(f"⛔ 信号阻断: 簇{cluster_id}看涨 但 AI看跌 (方向冲突)")
+                print(f"⛔ 信号阻断: 簇2 AI预测信心不足 ({ai_conf:.3f} <= {target_conf})")
+
+        # 簇3：大涨，只做多，配合ai信号
+        elif cluster_id == 3:
+            if ai_dir == 1 and ai_conf > target_conf:
+                sig = 1
+                lev = 5
+                is_signal = True
+                match_reason = f"簇3大涨 + AI看涨(信心{ai_conf:.2f})"
+            elif ai_dir != 1:
+                ai_direction_text = "看跌" if ai_dir == -1 else "中性"
+                print(f"⛔ 信号阻断: 簇3只做多 但 AI{ai_direction_text} (方向冲突)")
+            else:
+                print(f"⛔ 信号阻断: 簇3 AI预测信心不足 ({ai_conf:.3f} <= {target_conf})")
+
+        # 簇4：跌，只做空，配合ai信号
+        elif cluster_id == 4:
+            if ai_dir == -1 and ai_conf > target_conf:
+                sig = -1
+                lev = 5
+                is_signal = True
+                match_reason = f"簇4跌 + AI看跌(信心{ai_conf:.2f})"
+            elif ai_dir != -1:
+                ai_direction_text = "看涨" if ai_dir == 1 else "中性"
+                print(f"⛔ 信号阻断: 簇4只做空 但 AI{ai_direction_text} (方向冲突)")
+            else:
+                print(f"⛔ 信号阻断: 簇4 AI预测信心不足 ({ai_conf:.3f} <= {target_conf})")
 
         if is_signal:
             print(f"✅ 信号生成: {match_reason}")

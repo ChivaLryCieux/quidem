@@ -5,13 +5,14 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
+import os
 import time
 
 # ==========================================
 # 1. 配置区域 (User Configuration)
 # ==========================================
 SYMBOL = 'XRP/USDT'  # 交易对
-TIMEFRAME = '15m'  # K线周期, 主要分析15m和1h
+TIMEFRAME = '1m'  # K线周期, 主要分析15m和1h
 LIMIT = 10000  # 拉取K线数量
 WINDOWS = [5, 10, 25, 50]  # 特征窗口 T
 N_CLUSTERS = 5  # 聚类数量 K
@@ -112,6 +113,16 @@ def run_clustering_analysis(df, feature_cols, n_clusters):
     stats['percentage'] = stats['count'] / len(df) * 100
     cluster_means = df.groupby('cluster')[feature_cols].mean()
 
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    
+    backtest_centroids_path = os.path.join(os.path.dirname(__file__), 'centroids.csv')
+    cluster_means.to_csv(backtest_centroids_path)
+    print(f"聚类质心已保存到: {backtest_centroids_path}")
+    
+    core_centroids_path = os.path.join(os.path.dirname(__file__), '..', 'core', 'centroids.csv')
+    cluster_means.to_csv(core_centroids_path)
+    print(f"聚类质心已同步到: {core_centroids_path}")
+
     return df, stats, cluster_means
 
 
@@ -176,6 +187,11 @@ def plot_results_custom(df, transition_probs, n_clusters):
     ax3.set_xlabel('Next Cluster')
 
     plt.tight_layout()
+    
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    plot_path = os.path.join(os.path.dirname(__file__), f'kmeans_{timestamp}.png')
+    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+    print(f"聚类分析图表已保存到: {plot_path}")
     plt.show()
 
 
