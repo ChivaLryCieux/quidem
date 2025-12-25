@@ -14,6 +14,7 @@ else:
     import tty
     import termios
 
+
 # ==========================================
 # 终端 UI 管理
 # ==========================================
@@ -26,17 +27,31 @@ class DisplayManager:
         if strategy_desc:
             print(f"{Fore.YELLOW}>>> 策略: {strategy_desc}{Style.RESET_ALL}")
 
+    def log_msg(self, msg, level="info"):
+        sys.stdout.write("\r\033[K")
+
+        if level == "error":
+            print(f"{Fore.RED}❌ [ERR] {msg}{Style.RESET_ALL}")
+        elif level == "success":
+            print(f"{Fore.GREEN}✅ [OK] {msg}{Style.RESET_ALL}")
+        elif level == "warning":
+            print(f"{Fore.YELLOW}⚠️ [WARN] {msg}{Style.RESET_ALL}")
+        else:
+            print(f"{Fore.CYAN}ℹ️ [INFO] {msg}{Style.RESET_ALL}")
+
+    # ==============================
+
     def log_entry(self, regime, color, side, leverage, obi, price, sl, tp):
-        sys.stdout.write("\r" + " " * 100 + "\r")
+        sys.stdout.write("\r\033[K")  # 清除当前行
         dir_str = "开多" if side == 1 else "开空"
-        print(f"\n{color}>>> ⚡️ {regime} | {dir_str} | {leverage}x | OBI:{obi:.2f}{Style.RESET_ALL}")
+        print(f"{color}>>> ⚡️ {regime} | {dir_str} | {leverage}x | OBI:{obi:.2f}{Style.RESET_ALL}")
         print(f"    🎯 TP: {tp:.4f} | 🛡️ SL: {sl:.4f}")
 
     def log_exit(self, reason, price, pnl, fee, balance, extra=""):
-        sys.stdout.write("\r" + " " * 100 + "\r")
+        sys.stdout.write("\r\033[K")  # 清除当前行
         pnl_color = Fore.GREEN if pnl >= 0 else Fore.RED
         print(
-            f"\n{reason} | P:{price} | PnL:{pnl_color}{pnl:+.2f}{Style.RESET_ALL} (Fee:-{fee:.2f}) | Bal:${balance:.2f} {extra}")
+            f"{reason} | P:{price} | PnL:{pnl_color}{pnl:+.2f}{Style.RESET_ALL} (Fee:-{fee:.2f}) | Bal:${balance:.2f} {extra}")
 
     def update_status(self, pos, regime, color, obi, pnl, price, hf_pred_1m, hf_pred_diff, ai_conf, cluster_id=5):
         status_icon = "🟢" if pos > 0 else "🔴" if pos < 0 else "⚪"
