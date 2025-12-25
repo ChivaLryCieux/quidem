@@ -4,6 +4,7 @@ import pandas as pd
 import pywt
 from scipy.stats import t as student_t
 
+
 # ==========================================
 # 数学与分析工具集：指标与特征
 # ==========================================
@@ -96,7 +97,7 @@ class OnlineBOCPD:
         new_beta = np.append(1e-4, self.beta + (self.kappa * (x - self.mu) ** 2) / (2 * (self.kappa + 1)))
         limit = len(self.R)
         self.alpha, self.kappa, self.mu, self.beta = new_alpha[:limit], new_kappa[:limit], new_mu[:limit], new_beta[
-            :limit]
+                                                                                                           :limit]
         return self.R[0]
 
 
@@ -130,10 +131,10 @@ class MomentumCalculator:
         max_period = max(self.periods)
         if len(self.price_history) > max_period:
             self.price_history.pop(0)
-        
+
         momentum_values = {}
         current_price = price
-        
+
         for T in self.periods:
             if len(self.price_history) >= T + 1:
                 price_T_periods_ago = self.price_history[-(T + 1)]
@@ -142,7 +143,7 @@ class MomentumCalculator:
                 momentum_values[f"T_{T}"] = np.log(momentum)
             else:
                 momentum_values[f"T_{T}"] = None
-        
+
         return momentum_values
 
     def get_momentum(self, prices, T):
@@ -151,7 +152,7 @@ class MomentumCalculator:
         momentum = prices[-1] / prices[-(T + 1)]
         # 取对数输出
         return np.log(momentum)
-    
+
     def calculate_all_momentums(self, prices):
         results = {}
         for T in self.periods:
@@ -159,33 +160,67 @@ class MomentumCalculator:
         return results
 
 
-# 对数收益率的滚动标准差 ，不是严谨的已实现波动率
+
 class RealizedVolatilityCalculator:
     def __init__(self, periods=[5, 10, 25, 50]):
         self.periods = periods
 
     def update(self, price):
-        # 兼容旧接口，但不做任何操作，因为我们现在使用 calculate_from_history
         return {}
+
+    def calculate_all_volatilities(self, prices_list):
+        """
+        [修复] 专门处理从列表传入的价格数据
+        计算不同窗口期(5, 10, 25, 50)的实际波动率
+        """
+        results = {}
+        # 数据不足保护
+        if not prices_list or len(prices_list) < 2:
+            for w in self.periods:
+                results[f"T_{w}"] = 0.0
+            return results
+
+        try:
+            # 1. 列表转numpy数组，计算对数收益率
+            arr = np.array(prices_list, dtype=float)
+            # 避免log(0)或负数
+            arr = np.maximum(arr, 1e-9)
+            # diff(log(p)) 得到收益率序列
+            log_returns = np.diff(np.log(arr))
+
+            # 2. 遍历窗口计算标准差
+            for w in self.periods:
+                if len(log_returns) >= w:
+                    # 取最后 w 个收益率
+                    window_slice = log_returns[-w:]
+                    vol = np.std(window_slice)
+                    results[f"T_{w}"] = vol
+                else:
+                    # 如果数据不够长，尝试用现有的所有数据，或者返回0
+                    if len(log_returns) > 0:
+                        results[f"T_{w}"] = np.std(log_returns)
+                    else:
+                        results[f"T_{w}"] = 0.0
+
+        except Exception as e:
+            # 发生任何数学错误，返回0以防崩溃
+            for w in self.periods:
+                results[f"T_{w}"] = 0.0
+
+        return results
 
     def calculate_from_history(self, history_df):
         """
-        基于完整的 DataFrame 历史计算波动率
-        history_df: 必须包含 'close' 列
+        保留此方法，兼容DataFrame输入
         """
         if len(history_df) < max(self.periods) + 2:
             return {f"T_{t}": 0.0 for t in self.periods}
 
-        # 计算对数收益率
-        # log_ret = ln(Pt / Pt-1)
-        # 这里的 fillna(0) 很重要，防止第一行 NaN 污染后续计算
         log_returns = np.log(history_df['close'] / history_df['close'].shift(1)).fillna(0)
 
         vol_values = {}
         for T in self.periods:
             if len(log_returns) >= T:
-                # 计算滚动标准差作为波动率
-                # 使用 T 周期内的标准差
                 vol = log_returns.tail(T).std()
                 if np.isnan(vol): vol = 0.0
                 vol_values[f"T_{T}"] = vol

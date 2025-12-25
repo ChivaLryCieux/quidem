@@ -303,11 +303,14 @@ class KMeansClusterAnalyzer:
 
         # 1. 提取动量
         for T in periods:
-            features.append(momentum_values.get(f"T_{T}", 0.0))
+            val = momentum_values.get(f"T_{T}")
+            # 如果 val 是 None，则使用 0.0，否则使用 val
+            features.append(val if val is not None else 0.0)
 
         # 2. 提取波动率
         for T in periods:
-            features.append(volatility_values.get(f"T_{T}", 0.0))
+            val = volatility_values.get(f"T_{T}")
+            features.append(val if val is not None else 0.0)
 
         feature_vector = np.array(features)
 
