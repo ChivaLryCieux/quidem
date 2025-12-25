@@ -18,7 +18,7 @@ os.environ["HTTPS_PROXY"] = "http://127.0.0.1:7890"
 
 REDIS_HOST = 'localhost'
 RESEND_API_KEY = "re_39zFrC4s_KhUDNyHg8ZFRR8LkXg8cN8Ry"  # 你的 Key
-MAIL_FROM = "XRP量化基金 <report@abyssalfish.top>"
+MAIL_FROM = "XRP量化交易机器人 <report@abyssalfish.top>"
 MAIL_TO = ["3433551710@qq.com", "2874575651@qq.com","2129325064@qq.com"]
 
 # 自动处理路径
@@ -389,5 +389,5 @@ schedule.every().day.at("23:00").do(send_digest)
 
 if __name__ == "__main__":
     if not os.path.exists(ARCHIVE_DIR): os.makedirs(ARCHIVE_DIR)
-    print(f"=== 基金级报告服务 (Equity Curve & Risk Analysis) 已启动 ===")
+    print(f"=== 报告服务 (Equity Curve & Risk Analysis) 已启动 ===")
     while True: schedule.run_pending(); time.sleep(1)

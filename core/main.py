@@ -12,6 +12,7 @@ from ui import DisplayManager, KeyListener
 
 init(autoreset=True)
 
+
 # ==========================================
 # 机器人主引擎 (Trading Bot Engine)
 # ==========================================
@@ -33,16 +34,15 @@ class QuantBot:
         self.brain = StrategyBrain()
         self.risk = RiskManager()
 
-        #初始化邮件转发功能
+        # 初始化邮件转发功能 (Redis)
         self.redis_client = None
-        self.trade_snapshots = []  # 用于记录资金曲线
+        self.trade_snapshots = []
         self.last_snapshot_time = 0
 
         if Config.ENABLE_MAIL_REPORT:
             try:
-                # 尝试连接 Redis
                 self.redis_client = redis.Redis(host='localhost', port=6379, db=0)
-                self.redis_client.ping()  # 测试连接
+                self.redis_client.ping()
                 print(f"{Fore.GREEN}邮件服务已连接 {Style.RESET_ALL}")
             except Exception as e:
                 print(f"{Fore.RED}邮件服务连接失败 {e}{Style.RESET_ALL}")
@@ -51,10 +51,14 @@ class QuantBot:
         # 交易状态
         self.balance = 100.0
         self.position = {'size': 0.0, 'entry_price': 0.0, 'sl': 0.0, 'tp': 0.0, 'entry_time': 0}
-        # last_candle_closed_time 用于判断新K线是否生成
-        self.last_candle_closed_time = 0
+
         self.profit_flip_count = 0
         self.was_in_profit = False
+
+        # === 初始化时间戳与分析缓存 ===
+        self.current_candle_timestamp = 0
+        self.last_tick_analysis = None
+        self.last_tick_price = 0.0
 
     def run(self):
         self.ui.log_startup(self.mode_name)
@@ -73,27 +77,26 @@ class QuantBot:
         initial_ohlcv_15m = initial_data['15m']
 
         if initial_ohlcv_1m and initial_ohlcv_15m:
-            # 处理1分钟数据（用于训练和预测）
+            # 处理1分钟数据
             for candle in initial_ohlcv_1m:
                 self.brain.ingest_candle(candle, '1m')
+                # 简单预热训练
                 res = self.brain.analyze()
                 if res:
-                    # 三分类标签规则：基于绝对止盈距离的0.5倍
                     price_diff = float(candle[4]) - float(candle[1])
+                    label = 0
                     if price_diff > Config.MIN_TP_DISTANCE * 0.2:
-                        label = 1  # 看涨
+                        label = 1
                     elif price_diff < -Config.MIN_TP_DISTANCE * 0.2:
-                        label = -1  # 看跌
-                    else:
-                        label = 0  # 中性
+                        label = -1
                     self.brain.train_ai(res['features'], label)
 
-            # 处理15分钟数据（只用于分析，不训练）
+            # 处理15分钟数据
             for candle in initial_ohlcv_15m:
                 self.brain.ingest_candle(candle, '15m')
 
-            # 设置最近一根收盘K线的时间
-            self.last_candle_closed_time = initial_ohlcv_1m[-2][0]
+            # 初始化时间戳
+            self.current_candle_timestamp = initial_ohlcv_1m[-1][0]
         else:
             self.ui.log_msg("预热数据获取失败", "error")
             self.exchange.close()
@@ -110,84 +113,97 @@ class QuantBot:
             except KeyboardInterrupt:
                 self._exit_procedure()
             except Exception as e:
-                self.ui.log_msg(f"Loop Error: {e}", "error")
+                import traceback
+                print(f"{Fore.RED}Loop Error: {e}")
+                traceback.print_exc()
+                print(f"{Style.RESET_ALL}")
                 time.sleep(1)
 
     def _tick(self):
-        # 1. 从本地缓存获取最新数据 (非阻塞)
+        # 1. 从本地缓存获取最新数据
         curr_candle_1m, curr_candle_15m, book, funding_rate = self.exchange.get_latest_data()
         if not curr_candle_1m: return
 
-        # curr_candle_1m 格式: [t, o, h, l, c, v]
-        # WebSocket 推送的是"当前正在进行"的K线。
-        curr_time = curr_candle_1m[0]
-        curr_price = curr_candle_1m[4]
+        timestamp = curr_candle_1m[0]
+        curr_price = float(curr_candle_1m[4])
 
-        # 实时送入 Brain 进行计算 (即便是未收盘的K线也可以用来计算实时指标)
+        # === K线收盘检测与增量学习 ===
+        if self.current_candle_timestamp == 0:
+            self.current_candle_timestamp = timestamp
+
+        if timestamp > self.current_candle_timestamp:
+            if self.last_tick_analysis is not None:
+                print(f"{Fore.MAGENTA}[Candle Close] K线收盘: {self.current_candle_timestamp} -> {timestamp}{Style.RESET_ALL}")
+                self.brain.on_candle_close(self.last_tick_analysis, self.last_tick_price)
+            self.current_candle_timestamp = timestamp
+
+        # 2. 实时送入 Brain
         self.brain.ingest_candle(curr_candle_1m, '1m')
-        
-        # 如果有15分钟数据，也送入Brain
         if curr_candle_15m:
             self.brain.ingest_candle(curr_candle_15m, '15m')
 
-        # 记录交易快照 (用于邮件画微型走势图)
+        # 3. 记录交易快照
         if Config.ENABLE_MAIL_REPORT and self.position['size'] != 0:
             now = time.time()
             if now - self.last_snapshot_time >= 15:
                 pnl = (curr_price - self.position['entry_price']) * self.position['size']
-
                 self.trade_snapshots.append({
-                    "time": now,
-                    "price": curr_price,
-                    "pnl": pnl,
-                    "regime": self.brain.state
+                    "time": now, "price": curr_price, "pnl": pnl, "regime": self.brain.state
                 })
                 self.last_snapshot_time = now
 
-        # 2. 持仓管理 (实时监控价格)
+        # 4. 持仓管理
         if self.position['size'] != 0:
             self._manage_position(curr_price, funding_rate)
 
-        # 3. 开仓逻辑
-        analysis = self.brain.analyze(book)
+        # 5. 开仓逻辑
+        if book:
+            analysis = self.brain.analyze(book)
+        else:
+            analysis = None
 
-        # 只有当数据足够新，且不在CD中
         if analysis and not self.risk.is_in_cooldown():
             if self.position['size'] == 0:
                 self._attempt_entry(analysis, curr_price, funding_rate)
 
-        # 4. UI更新
-        unrealized_pnl = (curr_price - self.position['entry_price']) * self.position['size'] if self.position[
-                                                                                                    'size'] != 0 else 0
-        # 获取H无穷滤波器1min预测价格、15min与1min预测价差和AI置信度
-        hf_pred_1m = self.brain.rf_classifier.hf_predictor_1m.x if analysis else 0.0
+        # 6. UI更新
+        unrealized_pnl = (curr_price - self.position['entry_price']) * self.position['size'] if self.position['size'] != 0 else 0
+
+        # [修复] 获取 HF 预测值，改为获取 last_hf_prediction
+        hf_pred_1m = getattr(self.brain.rf_classifier, 'last_hf_prediction', 0.0)
         hf_pred_diff = self.brain.rf_classifier.price_prediction_diff if analysis else 0.0
         ai_conf = analysis.get('ai_prediction', (0, 0.0))[1] if analysis else 0.0
-        
-        # 获取聚类信息
         cluster_data = analysis.get('cluster', (5, 0.0)) if analysis else (5, 0.0)
         cluster_id = cluster_data[0]
-        
-        self.ui.update_status(self.position['size'], self.brain.state, self.brain.color, 
-                             analysis.get('obi', 0.0) if analysis else 0.0, 
-                             unrealized_pnl, curr_price, hf_pred_1m, hf_pred_diff, ai_conf, cluster_id)
+        obi = analysis.get('obi', 0.0) if analysis else 0.0
+
+        self.ui.update_status(
+            self.position['size'], self.brain.state, self.brain.color,
+            obi, unrealized_pnl, curr_price,
+            hf_pred_1m, hf_pred_diff, ai_conf, cluster_id
+        )
+
+        # Redis 心跳
         if Config.ENABLE_MAIL_REPORT and self.redis_client:
             try:
-                # 构造心跳包
                 heartbeat_data = {
                     "timestamp": int(time.time() * 1000),
                     "balance": self.balance,
                     "position_size": self.position['size'],
                     "price": curr_price,
-                    "regime": self.brain.state,  # 例如 "NOISE"
-                    "ai_conf": ai_conf,  # 例如 0.21
-                    "cluster": cluster_id,  # 例如 1
-                    "hf_pred": hf_pred_1m  # 预测价格
+                    "regime": self.brain.state,
+                    "ai_conf": ai_conf,
+                    "cluster": cluster_id,
+                    "hf_pred": hf_pred_1m
                 }
-                # 使用 set 覆盖写入，只保留最新状态
                 self.redis_client.set('bot_status_heartbeat', json.dumps(heartbeat_data))
             except Exception:
-                pass  # 心跳写入失败不应卡死主线程
+                pass
+
+        # 缓存当前帧
+        if analysis:
+            self.last_tick_analysis = analysis
+            self.last_tick_price = curr_price
 
     def _manage_position(self, curr_price, funding_rate):
         pos = self.position
@@ -197,32 +213,21 @@ class QuantBot:
         if not self.was_in_profit and is_prof: self.profit_flip_count += 1
         self.was_in_profit = is_prof
 
-        # 获取当前分析数据，用于获取ATR和价差信息
         analysis = self.brain.analyze()
         atr = analysis.get('atr', 0.0) if analysis else 0.0
-        price_pred_diff = analysis.get('price_prediction_diff', 0.0) if analysis else 0.0
-        
-        # 根据翻转次数动态调整止盈距离
-        # 第一次翻转，止盈距离不变，第二次翻转，止盈距离变为原来的75%，第三次及以上，一有盈利就平仓
+
         if self.profit_flip_count >= 1:
-            # 计算原始止盈距离
             original_tp_distance = max(atr * 2, pos['entry_price'] * Config.MIN_TP_DISTANCE)
-            
-            # 根据翻转次数调整止盈距离
             if self.profit_flip_count == 1:
-                # 第一次翻转，保持原有止盈距离
                 adjusted_tp_distance = original_tp_distance
             elif self.profit_flip_count == 2:
-                # 第二次翻转，止盈距离变为原来的75%
                 adjusted_tp_distance = original_tp_distance * 0.75
             else:
-                # 第三次及以上，一有盈利就平仓
-                adjusted_tp_distance = 0.0  # 任何盈利都平仓
-            
-            # 更新止盈价格
-            if pos['size'] > 0:  # 做多
+                adjusted_tp_distance = 0.0
+
+            if pos['size'] > 0:
                 pos['tp'] = pos['entry_price'] + adjusted_tp_distance
-            else:  # 做空
+            else:
                 pos['tp'] = pos['entry_price'] - adjusted_tp_distance
 
         should_exit, reason = self.risk.check_exit_conditions(
@@ -233,14 +238,11 @@ class QuantBot:
             self._execute_exit(reason, curr_price, funding_rate)
 
     def _attempt_entry(self, data, price, funding_rate):
-        # 将复杂的信号判断逻辑委托给 strategy 模块
         sig, lev = self.brain.get_entry_signal(data, price)
         regime = self.brain.state
-
-        #获取当前簇ID
         cluster_data = data.get('cluster', (5, 0.0))
         current_cluster_id = cluster_data[0]
-        # 如果收到有效信号 (sig != 0)，执行风控检查与下单
+
         if sig != 0:
             is_risky, fr_msg = self.risk.check_funding_rate_risk(sig, funding_rate)
             if is_risky:
@@ -253,33 +255,22 @@ class QuantBot:
 
             if amount > 0:
                 side = 'buy' if sig == 1 else 'sell'
-                # 交易执行仍然走 REST API
                 if self.exchange.execute_order(side, amount):
-                    # 设置止盈止损平仓判定逻辑
+                    atr = data.get('atr', 0.0)
+                    sl_dist = price * (1 / lev) * 0.8
+                    tp_dist = max(atr * 2, price * Config.MIN_TP_DISTANCE)
+
                     self.position = {
                         'size': amount if sig == 1 else -amount,
                         'entry_price': price,
                         'entry_time': time.time() * 1000,
-                        'sl': price * (1 - 0.005) if sig == 1 else price * (1 + 0.005),
-                        'tp': price * (1 + 0.01) if sig == 1 else price * (1 - 0.01),
+                        'sl': price - sl_dist if sig == 1 else price + sl_dist,
+                        'tp': price + tp_dist if sig == 1 else price - tp_dist,
                         'cluster': current_cluster_id
                     }
-                    
-                    # 根据新的状态机逻辑设置止损止盈
-                    # 使用ATR和最小止盈距离中的较大值
-                    atr = data.get('atr', 0.0)
-                    tp_distance = max(atr * 2, price * Config.MIN_TP_DISTANCE)
-                    
-                    # 设置止损
-                    dist = price * (1 / lev) * 0.8
-                    self.position['sl'] = price - dist if sig == 1 else price + dist
-                    
-                    # 设置止盈
-                    self.position['tp'] = price + tp_distance if sig == 1 else price - tp_distance
 
-                    self.ui.log_entry(regime, self.brain.color, sig, lev, 
-                                     data.get('obi', 0.0), price, self.position['sl'],
-                                     self.position['tp'])
+                    self.ui.log_entry(regime, self.brain.color, sig, lev,
+                                      data.get('obi', 0.0), price, self.position['sl'], self.position['tp'])
                     self.profit_flip_count, self.was_in_profit = 0, False
 
     def _execute_exit(self, reason, price, funding_rate):
@@ -299,7 +290,6 @@ class QuantBot:
 
             self.ui.log_exit(reason, price, net_pnl, fee, self.balance, cd_msg)
 
-            #发送邮件报告数据
             if Config.ENABLE_MAIL_REPORT and self.redis_client:
                 try:
                     trade_record = {
@@ -322,9 +312,9 @@ class QuantBot:
                     self.redis_client.rpush('trade_journal_pending', json.dumps(trade_record))
                 except Exception as e:
                     print(f"{Fore.RED}[邮件发送失败] Redis 错误: {e}{Style.RESET_ALL}")
+
             self.trade_snapshots = []
             self.last_snapshot_time = 0
-
             self.position = {'size': 0.0, 'entry_price': 0.0, 'sl': 0.0, 'tp': 0.0, 'entry_time': 0}
 
     def _check_user_input(self):
@@ -335,7 +325,7 @@ class QuantBot:
                 self._exit_procedure()
 
     def _exit_procedure(self):
-        self.exchange.close()  # 关闭WS
+        self.exchange.close()
         if self.position['size'] != 0:
             print("正在平仓并退出...")
             self._execute_exit("手动退出", 0.0, 0.0)
