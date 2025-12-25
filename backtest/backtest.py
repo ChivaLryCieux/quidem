@@ -2,23 +2,23 @@
 回测器使用方法
 
 快速开始（默认使用 Binance U 本位合约数据源）：
-  python backtest/backtest.py --symbol XRP/USDT --balance 100
+  python backtest/backtest_test.py --symbol XRP/USDT --balance 100
 
 按最近 N 天回测：
-  python backtest/backtest.py --symbol XRP/USDT --lookback-days 30
+  python backtest/backtest_test.py --symbol XRP/USDT --lookback-days 30
 
 指定时间区间（本地时区由 pandas 解析，最终转为毫秒时间戳）：
-  python backtest/backtest.py --symbol XRP/USDT --since "2025-01-01" --end "2025-02-01"
+  python backtest/backtest_test.py --symbol XRP/USDT --since "2025-01-01" --end "2025-02-01"
 
 绘图与降采样（适合一年级别回测）：
-  python backtest/backtest.py --symbol XRP/USDT --lookback-days 365 --plot-resample 15T --plot-max-points 12000 --plot-dpi 180 --plot-figsize 16,9
+  python backtest/backtest_test.py --symbol XRP/USDT --lookback-days 365 --plot-resample 15T --plot-max-points 12000 --plot-dpi 180 --plot-figsize 16,9
 
 输出文件：
   默认输出到 backtest/outputs/YYYYMMDD_HHMMSS/
   - 01_price.png        价格与交易标记（含成交价 vs close 的偏差细线）
   - 02_equity_curve.png 权益曲线（标题统计杠杆与注资次数/总额）
   - 03_drawdown.png     回撤曲线
-  - backtest_YYYYMMDD_HHMMSS.csv 交易明细（开/平仓）
+  - trades.csv          交易明细
 
 常用参数：
   --slippage            滑点（小数），例如 0.0002 = 2bps
@@ -148,7 +148,6 @@ class StrategyBacktesterUnified:
         self.inject_amount = 1000.0
         self.title_leverage = 2.0
         self.run_dir = ""
-        self.run_tag = ""
         
         self.save_path = None
         self.snapshots = []
@@ -366,7 +365,6 @@ class StrategyBacktesterUnified:
 
         base_dir = self.save_path if self.save_path and os.path.isdir(self.save_path) else os.path.join(os.path.dirname(__file__), "outputs")
         ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.run_tag = ts_str
         self.run_dir = os.path.join(base_dir, ts_str)
         os.makedirs(self.run_dir, exist_ok=True)
         print(f"📁 输出目录: {self.run_dir}")
@@ -438,8 +436,7 @@ class StrategyBacktesterUnified:
     def _save_csv(self):
         if not self.trades: return
         
-        tag = self.run_tag if isinstance(self.run_tag, str) and self.run_tag else datetime.now().strftime("%Y%m%d_%H%M%S")
-        fname = f"backtest_{tag}.csv"
+        fname = "trades.csv"
         out_dir = self.run_dir if self.run_dir and os.path.isdir(self.run_dir) else os.getcwd()
         fpath = os.path.join(out_dir, fname)
         
