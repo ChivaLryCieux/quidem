@@ -82,7 +82,7 @@ class RiskManager:
 
         return False, ""
 
-    def activate_circuit_breaker(self, net_pnl, margin_used):
+    def activate_circuit_breaker(self, net_pnl, margin_used, now_ms=None):
         if net_pnl >= 0: return 0, ""
         roi = net_pnl / (margin_used + 1e-9)
         cooldown_hours = 0
@@ -91,9 +91,11 @@ class RiskManager:
                 cooldown_hours = hours
                 break
         if cooldown_hours > 0:
-            self.cooldown_end_time = time.time() * 1000 + (cooldown_hours * 3600 * 1000)
+            base_ms = float(now_ms) if now_ms is not None else (time.time() * 1000)
+            self.cooldown_end_time = base_ms + (cooldown_hours * 3600 * 1000)
             return cooldown_hours, f"触发熔断: 亏损 {roi * 100:.1f}%, 暂停 {cooldown_hours}h"
         return 0, ""
 
-    def is_in_cooldown(self):
-        return (time.time() * 1000) < self.cooldown_end_time
+    def is_in_cooldown(self, now_ms=None):
+        base_ms = float(now_ms) if now_ms is not None else (time.time() * 1000)
+        return base_ms < self.cooldown_end_time
