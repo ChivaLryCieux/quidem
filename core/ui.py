@@ -39,18 +39,21 @@ class DisplayManager:
             f"\n{reason} | P:{price} | PnL:{pnl_color}{pnl:+.2f}{Style.RESET_ALL} (Fee:-{fee:.2f}) | Bal:${balance:.2f} {extra}")
 
     def update_status(self, pos, regime, color, obi, pnl, price, hf_pred_1m, hf_pred_diff, ai_conf, cluster_id=5):
-        status = "🟢 LONG" if pos > 0 else "🔴 SHORT" if pos < 0 else "⚪ WAIT"
+        status_icon = "🟢" if pos > 0 else "🔴" if pos < 0 else "⚪"
         pnl_c = Fore.GREEN if pnl >= 0 else Fore.RED
-        cluster_display = f"C{cluster_id}" if cluster_id != 5 else "C5(初始)"
-        bar = (f"\r{status} | {color}{regime}{Style.RESET_ALL} | OBI:{obi:+.2f} | "
-               f"Price:{price:.4f} | HF1m:{hf_pred_1m:.4f} | Diff:{hf_pred_diff:+.4f} | AI:{ai_conf:.2f} | "
-               f"Cluster:{cluster_display} | PnL:{pnl_c}${pnl:+.2f}{Style.RESET_ALL}")
-        sys.stdout.write(f"{bar:<140}")
+        cluster_display = f"C{cluster_id}"
+        info_str = (
+            f"{status_icon} {color}{regime:<10}{Style.RESET_ALL} | "
+            f"OBI:{obi:+.2f} | "
+            f"P:{price:.4f} | "
+            f"HF:{hf_pred_1m:.4f} | "
+            f"Df:{hf_pred_diff:+.4f} | "
+            f"AI:{ai_conf:.2f} | "
+            f"Cls:{cluster_display} | "
+            f"PnL:{pnl_c}${pnl:+.2f}{Style.RESET_ALL}"
+        )
+        sys.stdout.write(f"\r\033[K{info_str}")
         sys.stdout.flush()
-
-    def log_msg(self, msg, type="info"):
-        color = Fore.RED if type == "error" else Fore.YELLOW if type == "warning" else Fore.CYAN
-        print(f"\r{color}>>> {msg}{Style.RESET_ALL}")
 
 
 class KeyListener:

@@ -171,6 +171,23 @@ class QuantBot:
         self.ui.update_status(self.position['size'], self.brain.state, self.brain.color, 
                              analysis.get('obi', 0.0) if analysis else 0.0, 
                              unrealized_pnl, curr_price, hf_pred_1m, hf_pred_diff, ai_conf, cluster_id)
+        if Config.ENABLE_MAIL_REPORT and self.redis_client:
+            try:
+                # 构造心跳包
+                heartbeat_data = {
+                    "timestamp": int(time.time() * 1000),
+                    "balance": self.balance,
+                    "position_size": self.position['size'],
+                    "price": curr_price,
+                    "regime": self.brain.state,  # 例如 "NOISE"
+                    "ai_conf": ai_conf,  # 例如 0.21
+                    "cluster": cluster_id,  # 例如 1
+                    "hf_pred": hf_pred_1m  # 预测价格
+                }
+                # 使用 set 覆盖写入，只保留最新状态
+                self.redis_client.set('bot_status_heartbeat', json.dumps(heartbeat_data))
+            except Exception:
+                pass  # 心跳写入失败不应卡死主线程
 
     def _manage_position(self, curr_price, funding_rate):
         pos = self.position
@@ -220,6 +237,9 @@ class QuantBot:
         sig, lev = self.brain.get_entry_signal(data, price)
         regime = self.brain.state
 
+        #获取当前簇ID
+        cluster_data = data.get('cluster', (5, 0.0))
+        current_cluster_id = cluster_data[0]
         # 如果收到有效信号 (sig != 0)，执行风控检查与下单
         if sig != 0:
             is_risky, fr_msg = self.risk.check_funding_rate_risk(sig, funding_rate)
@@ -241,7 +261,8 @@ class QuantBot:
                         'entry_price': price,
                         'entry_time': time.time() * 1000,
                         'sl': price * (1 - 0.005) if sig == 1 else price * (1 + 0.005),
-                        'tp': price * (1 + 0.01) if sig == 1 else price * (1 - 0.01)
+                        'tp': price * (1 + 0.01) if sig == 1 else price * (1 - 0.01),
+                        'cluster': current_cluster_id
                     }
                     
                     # 根据新的状态机逻辑设置止损止盈
@@ -295,6 +316,7 @@ class QuantBot:
                         "balance": self.balance,
                         "regime": self.brain.state,
                         "reason": reason,
+                        "cluster": self.position.get('cluster', 5),
                         "snapshots": self.trade_snapshots
                     }
                     self.redis_client.rpush('trade_journal_pending', json.dumps(trade_record))
