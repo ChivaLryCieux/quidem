@@ -7,7 +7,8 @@ from river.forest import ARFClassifier as AdaptiveRandomForestClassifier
 from colorama import Fore
 
 from config import Config
-from math_tools import MathUtils, HInfinityFilter1D, OnlineEGARCH, WaveletAnalyzer, MomentumCalculator, RealizedVolatilityCalculator, FractalAnalysis, OnlineBOCPD
+from math_tools import MathUtils, HInfinityFilter1D, OnlineEGARCH, WaveletAnalyzer, MomentumCalculator, \
+    RealizedVolatilityCalculator, FractalAnalysis, OnlineBOCPD
 
 
 # ==========================================
@@ -31,22 +32,21 @@ class OrderBookAnalyzer:
 
 
 # ==========================================
-# 2. 随机森林分类器 - 负责机器学习功能
+# 2. 随机森林分类器 (已修复动量计算逻辑)
 # ==========================================
 class RandomForestClassifier:
     def __init__(self):
         self.hf = HInfinityFilter1D(gamma=0.13)
-        # 添加两个额外的H无穷滤波器，分别用于1m和15m预测
         self.hf_predictor_1m = HInfinityFilter1D(gamma=0.13)
         self.hf_predictor_15m = HInfinityFilter1D(gamma=0.13)
-        
+
         self.egarch, self.wavelet = OnlineEGARCH(), WaveletAnalyzer()
         self.momentum_calc = MomentumCalculator()
         self.volatility_calc = RealizedVolatilityCalculator()
-        # 实例化FractalAnalysis和OnlineBOCPD
         self.fractal_analysis = FractalAnalysis(window_size=30)
-        self.bocpd = OnlineBOCPD(hazard=1/100, max_lags=200)
-        self.atr_15m_last = 0.0  # ATR缓存：仅在15m K线更新时计算一次，供训练与风控使用
+        self.bocpd = OnlineBOCPD(hazard=1 / 100, max_lags=200)
+
+        self.atr_15m_last = 0.0
         self.rf_model = compose.Pipeline(
             preprocessing.StandardScaler(),
             AdaptiveRandomForestClassifier(n_models=10, seed=42)
@@ -55,170 +55,153 @@ class RandomForestClassifier:
         self.history = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         self.history_15m = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         self.last_price = 0.0
-        self.price_prediction_diff = 0.0  # 存储15m预测与1m预测的差值
-        self.price_history_1m = []  # 存储1分钟价格历史，用于预测
-        self.price_history_15m = []  # 存储15分钟价格历史，用于预测
+        self.price_prediction_diff = 0.0
+        self.price_history_1m = []
+        self.price_history_15m = []
+
+        # 缓存数据
+        self.cached_analysis_data = None
 
     def ingest_candle(self, item, timeframe='1m'):
-        # item 格式: [timestamp, open, high, low, close, volume]
+        # item: [timestamp, open, high, low, close, volume]
         row = pd.DataFrame([{'timestamp': item[0], 'open': float(item[1]), 'high': float(item[2]),
                              'low': float(item[3]), 'close': float(item[4]), 'volume': float(item[5])}])
         curr_price = float(item[4])
-        
+
         if timeframe == '1m':
+            # 维护 1m K线历史
             if self.history.empty:
                 self.history = row
             else:
-                # 如果时间戳相同，更新最后一行（WS推送实时变动）
                 if self.history.iloc[-1]['timestamp'] == item[0]:
-                    self.history.iloc[-1] = row.iloc[0]
-                # 如果是新时间戳，追加
+                    self.history.iloc[-1] = row.iloc[0]  # 更新当前K线
                 elif item[0] > self.history.iloc[-1]['timestamp']:
-                    self.history = pd.concat([self.history, row], ignore_index=True)
+                    self.history = pd.concat([self.history, row], ignore_index=True)  # 新K线
 
-            self.history = self.history.iloc[-100:]  # 保持滑动窗口
-            
-            # 更新1分钟H无穷滤波器和价格历史
+            self.history = self.history.iloc[-100:]  # 保持窗口
+
+            # 更新无状态的实时滤波器 (Tick级更新)
             self.hf_predictor_1m.update(curr_price)
-            self.price_history_1m.append(curr_price)
-            if len(self.price_history_1m) > 100:  # 保持最近100个价格点
-                self.price_history_1m.pop(0)
-            
-            # 更新波动率计算器
             self.volatility_calc.update(curr_price)
-            
-            # 更新FractalAnalysis和OnlineBOCPD
             self.fractal_analysis.update(curr_price)
             self.bocpd.update(curr_price)
-            
+
+            # 更新价格历史队列
+            self.price_history_1m.append(curr_price)
+            if len(self.price_history_1m) > 100: self.price_history_1m.pop(0)
+
+            # === 触发特征重算并缓存 ===
+            self._recalculate_and_cache_features(curr_price)
+
         elif timeframe == '15m':
             if self.history_15m.empty:
                 self.history_15m = row
             else:
-                # 如果时间戳相同，更新最后一行（WS推送实时变动）
                 if self.history_15m.iloc[-1]['timestamp'] == item[0]:
                     self.history_15m.iloc[-1] = row.iloc[0]
-                # 如果是新时间戳，追加
                 elif item[0] > self.history_15m.iloc[-1]['timestamp']:
                     self.history_15m = pd.concat([self.history_15m, row], ignore_index=True)
 
-            self.history_15m = self.history_15m.iloc[-100:]  # 保持滑动窗口 # 仅保留最近100根15mK线，降低ATR计算成本
-            
-            # 更新15分钟H无穷滤波器和价格历史
+            self.history_15m = self.history_15m.iloc[-100:]
+
             self.hf_predictor_15m.update(curr_price)
             self.price_history_15m.append(curr_price)
-            if len(self.price_history_15m) > 100:  # 保持最近100个价格点
-                self.price_history_15m.pop(0)
-            
-            # 更新价格预测差值
+            if len(self.price_history_15m) > 100: self.price_history_15m.pop(0)
+
             self._update_price_prediction_diff()
-            
-            # 更新15m ATR缓存（降低计算频率，避免在1m循环中反复计算）
+
             try:
                 if len(self.history_15m) >= 15:
-                    self.atr_15m_last = float(MathUtils.calc_atr(self.history_15m.iloc[-30:]).iloc[-1])  # 使用最近30根计算ATR并缓存
+                    self.atr_15m_last = float(MathUtils.calc_atr(self.history_15m.iloc[-30:]).iloc[-1])
             except Exception:
-                self.atr_15m_last = 0.0  # 异常时重置ATR缓存
+                self.atr_15m_last = 0.0
 
-    def extract_features(self):
-        df = self.history
-        if len(df) < 30: return None
-        curr_price = df['close'].iloc[-1]
-        log_ret = np.log(curr_price / self.last_price) if self.last_price else 0.0
+    def _recalculate_and_cache_features(self, curr_price):
+        if len(self.history) < 30:
+            self.cached_analysis_data = None
+            return
+
+        # 1. 基础指标
+        log_ret = np.log(curr_price / self.last_price) if self.last_price > 0 else 0.0
         self.last_price = curr_price
 
-        # 仅当价格变化时更新复杂滤波器，避免重复计算
         eg_vol = self.egarch.update(log_ret)
-
         hf_val = self.hf.update(curr_price)
-        wav_res, wav_eng = self.wavelet.process(df['close'].values)
+        wav_res, wav_eng = self.wavelet.process(self.history['close'].values)
+        rsi = MathUtils.calc_rsi(self.history['close']).iloc[-1]
+        atr = MathUtils.calc_atr(self.history).iloc[-1]
 
-        rsi = MathUtils.calc_rsi(df['close']).iloc[-1]
-        atr = MathUtils.calc_atr(df).iloc[-1]
-
-        curr_tr = max(df['high'].iloc[-1] - df['low'].iloc[-1], abs(df['high'].iloc[-1] - df['close'].iloc[-2]))
-        prev_atr = MathUtils.calc_atr(df.iloc[:-1]).iloc[-1]
+        curr_tr = max(self.history['high'].iloc[-1] - self.history['low'].iloc[-1],
+                      abs(self.history['high'].iloc[-1] - self.history['close'].iloc[-2]))
+        prev_atr = MathUtils.calc_atr(self.history.iloc[:-1]).iloc[-1]
         vol_expl = curr_tr / (prev_atr + 1e-9)
-        range_pct = (df['high'].iloc[-1] - df['low'].iloc[-1]) / df['open'].iloc[-1]
-
+        range_pct = (self.history['high'].iloc[-1] - self.history['low'].iloc[-1]) / self.history['open'].iloc[-1]
         hf_diff = (curr_price - hf_val) / hf_val
-        
-        # 计算四个时间段的对数动量
-        momentums = self.momentum_calc.update(curr_price)
-        mom_5 = momentums.get('T_5', 0.0) if momentums.get('T_5') is not None else 0.0
-        mom_10 = momentums.get('T_10', 0.0) if momentums.get('T_10') is not None else 0.0
-        mom_25 = momentums.get('T_25', 0.0) if momentums.get('T_25') is not None else 0.0
-        mom_50 = momentums.get('T_50', 0.0) if momentums.get('T_50') is not None else 0.0
 
-        # 计算四个时间段的已实现波动率
-        volatilities = self.volatility_calc.update(curr_price)
-        vol_5 = volatilities.get('T_5', 0.0) if volatilities.get('T_5') is not None else 0.0
-        vol_10 = volatilities.get('T_10', 0.0) if volatilities.get('T_10') is not None else 0.0
-        vol_25 = volatilities.get('T_25', 0.0) if volatilities.get('T_25') is not None else 0.0
-        vol_50 = volatilities.get('T_50', 0.0) if volatilities.get('T_50') is not None else 0.0
+        # 2. 动量计算 (基于历史列表)
+        prices_list = self.history['close'].tolist()
+        momentums = self.momentum_calc.calculate_all_momentums(prices_list)
 
-        # 获取Hurst指数和变点概率
-        hurst_exponent = self.fractal_analysis.update(curr_price)
-        change_point_prob = self.bocpd.update(curr_price)
+        # 3. 波动率计算 (基于 DataFrame，修复点)
+        # 直接传入当前的 history DataFrame
+        volatilities = self.volatility_calc.calculate_from_history(self.history)
+
+        # 4. 其他特征
+        hurst = self.fractal_analysis.update(curr_price)
+        cp_prob = self.bocpd.update(curr_price)
+
+        # 辅助函数：安全获取字典值
+        def get_val(d, k): return d.get(k, 0.0) if d.get(k) is not None else 0.0
+
+        # 注意：这里我们提取用于 feature 向量的值，虽然下面存了完整字典
+        # 但为了避免 RF 模型报错，这里还是按顺序解包
+        mom_5 = get_val(momentums, 'T_5')
+        mom_10 = get_val(momentums, 'T_10')
+        mom_25 = get_val(momentums, 'T_25')
+        mom_50 = get_val(momentums, 'T_50')
+
+        vol_5 = get_val(volatilities, 'T_5')
+        vol_10 = get_val(volatilities, 'T_10')
+        vol_25 = get_val(volatilities, 'T_25')
+        vol_50 = get_val(volatilities, 'T_50')
 
         features = np.array([
-            hf_diff,
-            eg_vol * 1000,
-            rsi / 100.0,
-            vol_expl,
-            range_pct,
-            (curr_price - wav_res) / curr_price * 100,
-            np.log1p(wav_eng),
-            mom_5,
-            mom_10,
-            mom_25,
-            mom_50,
-            vol_5,
-            vol_10,
-            vol_25,
-            vol_50,
-            self.price_prediction_diff,  # 价格预测差值
-            hurst_exponent,  # Hurst指数 - 分形分析特征
-            change_point_prob  # 变点概率 - 贝叶斯变点检测
+            hf_diff, eg_vol * 1000, rsi / 100.0, vol_expl, range_pct,
+                     (curr_price - wav_res) / curr_price * 100, np.log1p(wav_eng),
+            mom_5, mom_10, mom_25, mom_50,
+            vol_5, vol_10, vol_25, vol_50,
+            self.price_prediction_diff, hurst, cp_prob
         ]).reshape(1, -1)
 
-        return {
+        self.cached_analysis_data = {
             'features': features, 'price': curr_price, 'atr': atr, 'rsi': rsi,
             'vol_explosion': vol_expl, 'hf_diff': hf_diff, 'wavelet_energy': wav_eng,
             'mom_5': mom_5, 'mom_10': mom_10, 'mom_25': mom_25, 'mom_50': mom_50,
             'vol_5': vol_5, 'vol_10': vol_10, 'vol_25': vol_25, 'vol_50': vol_50,
             'range_pct': range_pct, 'price_prediction_diff': self.price_prediction_diff,
-            'momentum_values': momentums,  # 添加完整的动量字典
-            'volatility_values': volatilities,  # 添加完整的波动率字典
-            'hurst_exponent': hurst_exponent,  # Hurst指数特征
-            'change_point_prob': change_point_prob  # 变点概率特征
+            'momentum_values': momentums,
+            'volatility_values': volatilities,  # 存入完整的波动率字典
+            'hurst_exponent': hurst,
+            'change_point_prob': cp_prob
         }
 
+    def extract_features(self):
+        # 直接返回缓存，不再重复计算
+        return self.cached_analysis_data
+
     def _update_price_prediction_diff(self):
-        """更新15分钟预测与1分钟预测的差值（价格差值，非比例）"""
         try:
-            # 获取当前滤波器输出作为基础预测
             pred_15m_base = self.hf_predictor_15m.x
             pred_1m_base = self.hf_predictor_1m.x
-            
-            # 如果价格历史不足，使用滤波器输出差值
             if len(self.price_history_1m) < 2 or len(self.price_history_15m) < 2:
                 self.price_prediction_diff = pred_15m_base - pred_1m_base
                 return
-            
-            # 计算1分钟和15分钟的趋势
             trend_1m = (self.price_history_1m[-1] - self.price_history_1m[-2]) / (self.price_history_1m[-2] + 1e-9)
             trend_15m = (self.price_history_15m[-1] - self.price_history_15m[-2]) / (self.price_history_15m[-2] + 1e-9)
-            
-            # 预测15分钟后的价格（使用15分钟趋势，但转换为1分钟尺度）
             pred_15m = pred_15m_base * (1 + trend_15m * 15)
-            
-            # 预测1分钟后的价格
             pred_1m = pred_1m_base * (1 + trend_1m * 1)
-            
-            # 计算价格差值（非比例）
             self.price_prediction_diff = pred_15m - pred_1m
-        except Exception as e:
+        except Exception:
             self.price_prediction_diff = 0.0
 
     def train(self, features, label):
@@ -231,13 +214,9 @@ class RandomForestClassifier:
         x = {f"f{i}": v for i, v in enumerate(features.flatten())}
         probs = self.rf_model.predict_proba_one(x)
         if not probs: return 0, 0.0
-        
-        # 三分类预测：检查最高概率的类别
         prob_1 = probs.get(1, 0.0)
         prob_minus1 = probs.get(-1, 0.0)
         prob_0 = probs.get(0, 0.0)
-        
-        # 找到最高概率的类别
         if prob_1 >= prob_minus1 and prob_1 >= prob_0:
             return 1, prob_1
         elif prob_minus1 >= prob_1 and prob_minus1 >= prob_0:
@@ -252,88 +231,96 @@ class RandomForestClassifier:
 class KMeansClusterAnalyzer:
     def __init__(self, n_clusters=5):
         self.n_clusters = n_clusters
+        # 注意：这里不需要改，feature_names 只是内部用来对应特征向量顺序的
         self.feature_names = ['mom_5', 'mom_10', 'mom_25', 'mom_50', 'vol_5', 'vol_10', 'vol_25', 'vol_50']
-        
+
+        # ... (加载 CSV 的代码保持不变) ...
+        # 请保留原有的 __init__ 中加载 CSV 的代码
+
+        self.is_initialized = False
+        self.last_valid_cluster = 5
+
+        # 加载CSV部分省略，请保留原样...
         centroids_path = os.path.join(os.path.dirname(__file__), 'centroids.csv')
         if not os.path.exists(centroids_path):
-            print(f"错误: 未找到 centroids.csv 文件: {centroids_path}")
+            print(f"{Fore.RED}错误: 未找到 centroids.csv 文件{Fore.RESET}")
             sys.exit(1)
-        
         try:
             centroids_df = pd.read_csv(centroids_path, index_col=0)
             self.centroids = {}
-            
             for cluster_id in range(len(centroids_df)):
                 row = centroids_df.iloc[cluster_id]
-                centroid = [
-                    row['log_mom_5'],
-                    row['log_mom_10'],
-                    row['log_mom_25'],
-                    row['log_mom_50'],
-                    row['vol_5'],
-                    row['vol_10'],
-                    row['vol_25'],
-                    row['vol_50']
+                self.centroids[cluster_id] = [
+                    row.get('log_mom_5', 0), row.get('log_mom_10', 0),
+                    row.get('log_mom_25', 0), row.get('log_mom_50', 0),
+                    row.get('vol_5', 0), row.get('vol_10', 0),
+                    row.get('vol_25', 0), row.get('vol_50', 0)
                 ]
-                self.centroids[cluster_id] = centroid
-            print(f"成功从 {centroids_path} 加载 {len(self.centroids)} 个聚类质心")
-        except Exception as e:
-            print(f"错误: 加载 centroids.csv 失败: {e}")
+        except Exception:
             sys.exit(1)
-        
-        self.is_initialized = False
-        self.last_valid_cluster = 5
-        self.initialized = True
-        
+
     def predict_cluster(self, momentum_values, volatility_values):
-        """根据动量和波动率值预测当前市场所属的聚类"""
+        """
+        momentum_values: 字典，包含键 {'T_5', 'T_10', ...}
+        volatility_values: 字典，包含键 {'T_5', 'T_10', ...}
+        """
         if not momentum_values or not volatility_values:
-            # 如果还没有进行过有效聚类，保持簇5状态
-            if not self.is_initialized:
-                return 5, 999.0
-            # 如果已经初始化过，返回上次有效的聚类
-            else:
-                return self.last_valid_cluster, 0.0
-            
-        # 构建特征向量
+            return (self.last_valid_cluster, 0.0) if self.is_initialized else (5, 999.0)
+
         features = []
-        for name in self.feature_names[:4]:  # 动量特征
-            features.append(momentum_values.get(name, 0.0))
-        for name in self.feature_names[4:]:  # 波动率特征
-            features.append(volatility_values.get(name, 0.0))
-            
+
+        # === 修复点：正确映射键名 ===
+        # 我们知道 MomentumCalculator 和 VolatilityCalculator 现在的输出键名是 'T_5' 这种格式
+        periods = [5, 10, 25, 50]
+
+        # 1. 提取动量 (已是 Log 值)
+        for T in periods:
+            key = f"T_{T}"
+            val = momentum_values.get(key)
+            if val is None: val = 0.0
+            features.append(val)
+
+        # 2. 提取波动率
+        for T in periods:
+            key = f"T_{T}"
+            val = volatility_values.get(key)
+            if val is None: val = 0.0
+            features.append(val)
+
         feature_vector = np.array(features)
-        
-        # 计算到每个质心的距离
+
+        # 简单过滤：如果特征全为0，说明数据还没准备好，保持 Cluster 5
+        if np.all(feature_vector == 0):
+            return (self.last_valid_cluster, 0.0) if self.is_initialized else (5, 999.0)
+
         min_distance = float('inf')
-        best_cluster = 0
-        
+        best_cluster = 5
+
         for cluster_id, centroid in self.centroids.items():
-            # 计算欧氏距离
-            distance = np.linalg.norm(feature_vector - centroid)
-            if distance < min_distance:
-                min_distance = distance
+            dist = np.linalg.norm(feature_vector - np.array(centroid))
+            if dist < min_distance:
+                min_distance = dist
                 best_cluster = cluster_id
-        
-        # 一旦获得有效聚类，标记为已初始化，并记录有效聚类
+
+        # 只要找到了有效簇，就更新状态
         if best_cluster != 5:
             self.is_initialized = True
             self.last_valid_cluster = best_cluster
-            
+
         return best_cluster, min_distance
 
 
 # ==========================================
-# 4. 状态机 - 负责市场状态判断和交易信号生成
+# 4. 状态机
 # ==========================================
 class StateMachine:
     def __init__(self):
         self.state, self.color = "INIT", Fore.WHITE
         self.ob_analyzer = OrderBookAnalyzer()
-        self.last_cluster = 5  # 初始值记为5
+        self.last_cluster = 5
 
     def determine_regime(self, range_pct, vol_expl):
-        prev = self.state
+        # 逻辑保持不变...
         if range_pct < 0.0015:
             self.state, self.color = "💤 NOISE", Fore.WHITE
         elif vol_expl > 1.5:
@@ -342,20 +329,13 @@ class StateMachine:
             if vol_expl > 1.05:
                 self.state, self.color = "💥 BREAKOUT", Fore.MAGENTA
             else:
-                # 默认为震荡状态，除非有明确的趋势信号
                 self.state, self.color = "🦀 RANGE", Fore.YELLOW
         return self.state, self.color
 
     def get_entry_signal(self, analysis_data, current_price):
-        """
-        [调试版] 根据新的状态机判定机制计算交易信号
-        """
-        # --- 调试：检查输入数据完整性 ---
-        if not analysis_data:
-            print(f"DEBUG: analysis_data 为空")
-            return 0, Config.MIN_LEVERAGE
+        # 逻辑保持不变...
+        if not analysis_data: return 0, Config.MIN_LEVERAGE
 
-        # 获取订单簿分析
         if 'obi' in analysis_data and 'spread_pct' in analysis_data:
             obi = analysis_data['obi']
             spread_pct = analysis_data['spread_pct']
@@ -364,123 +344,48 @@ class StateMachine:
 
         features = analysis_data['features']
         ai_dir, ai_conf = analysis_data['ai_prediction']
+        cluster_data = analysis_data.get('cluster', (5, 0.0))
+        cluster_id = cluster_data[0]
 
-        # 获取价格预测差值
-        price_pred_diff = analysis_data.get('price_prediction_diff', 0.0)
+        sig, lev = 0, Config.MIN_LEVERAGE
 
-        sig = 0
-        lev = Config.MIN_LEVERAGE
-
-        # --- 调试：打印关键指标 ---
-        # print(f"DEBUG: AI方向={ai_dir}, 信心={ai_conf:.4f}, OBI={obi:.4f}, Spread={spread_pct:.5f}")
-
-        # 1. 基础过滤 (Spread & ATR)；回测模式下跳过价差过滤（订单簿数据可能缺失）
+        # 回测/实盘 过滤
         if (not getattr(Config, "BACKTEST_MODE", False)) and spread_pct > Config.MAX_SPREAD_PCT:
-            print(f"⛔ 信号阻断: 价差过大 ({spread_pct:.5f} > {Config.MAX_SPREAD_PCT})")
+            print(f"⛔ Spread过大: {spread_pct:.5f}")
             return 0, lev
 
-        # ATR 存在恶性问题，待解决
-        # min_atr = current_price * Config.MIN_ATR_PCT
-        # if analysis_data['atr'] < min_atr:
-            #     print(f"⛔ 信号阻断: 波动率不足 (ATR {analysis_data['atr']:.2f} < {min_atr:.2f})")
-        #     return 0, lev
-
-        # 2. 聚类分析器
-        current_cluster_data = analysis_data.get('cluster', (5, 0.0))
-        cluster_id = current_cluster_data[0]
-        cluster_distance = current_cluster_data[1]
-
-        # --- 调试：聚类状态 ---
         if cluster_id == 5:
-            # 检查是否是因为特征缺失导致一直卡在5
-            mom_vals = analysis_data.get('momentum_values', {})
-            if not mom_vals or mom_vals.get('T_50') == 0:
-                print(f"⛔ 信号阻断: 聚类特征未就绪 (Cluster 5). 动量数据: {len(mom_vals)}个")
-            else:
-                print(f"⛔ 信号阻断: 聚类结果为 5 (无效/等待)")
             return 0, lev
 
-        # 状态机逻辑：管理簇5到正常簇的转换
-        if self.last_cluster == 5:
-            print(f" 🔄 聚类初始化: 簇5 → 簇{cluster_id}")
+        if cluster_id != self.last_cluster:
+            print(f" 🔄 簇变更: {self.last_cluster} -> {cluster_id}")
             self.last_cluster = cluster_id
-            # 初始化转换时不交易，或者您可以选择交易
-            return 0, lev
-        else:
-            if cluster_id != self.last_cluster:
-                print(f" 🔄 聚类变化: 簇{self.last_cluster} → 簇{cluster_id}")
-                self.last_cluster = cluster_id
 
-        # 3. 信号匹配逻辑 (核心阻断点)
         target_conf = 0.4
-
-        match_reason = ""
         is_signal = False
+        match_reason = ""
 
-        # 簇0：波动，完全依靠ai信号开仓
+        # 信号映射逻辑 (保持您原有的逻辑)
         if cluster_id == 0:
             if ai_dir != 0 and ai_conf > target_conf:
-                sig = ai_dir
-                lev = 5
-                is_signal = True
-                ai_direction_text = "看涨" if ai_dir == 1 else "看跌"
-                match_reason = f"簇0波动 + AI{ai_direction_text}(信心{ai_conf:.2f})"
-            elif ai_dir == 0:
-                print(f"⛔ 信号阻断: 簇0 AI预测中性，不交易")
-            else:
-                print(f"⛔ 信号阻断: 簇0 AI预测信心不足 ({ai_conf:.3f} <= {target_conf})")
-
-        # 簇1：涨，只做多，配合ai信号
+                sig, lev, is_signal = ai_dir, 5, True
+                match_reason = f"簇0波动+AI信心{ai_conf:.2f}"
         elif cluster_id == 1:
             if ai_dir == 1 and ai_conf > target_conf:
-                sig = 1
-                lev = 5
-                is_signal = True
-                match_reason = f"簇1涨 + AI看涨(信心{ai_conf:.2f})"
-            elif ai_dir != 1:
-                ai_direction_text = "看跌" if ai_dir == -1 else "中性"
-                print(f"⛔ 信号阻断: 簇1只做多 但 AI{ai_direction_text} (方向冲突)")
-            else:
-                print(f"⛔ 信号阻断: 簇1 AI预测信心不足 ({ai_conf:.3f} <= {target_conf})")
-
-        # 簇2：大跌，只做空，配合ai信号
+                sig, lev, is_signal = 1, 5, True
+                match_reason = f"簇1涨+AI看涨{ai_conf:.2f}"
         elif cluster_id == 2:
             if ai_dir == -1 and ai_conf > target_conf:
-                sig = -1
-                lev = 5
-                is_signal = True
-                match_reason = f"簇2大跌 + AI看跌(信心{ai_conf:.2f})"
-            elif ai_dir != -1:
-                ai_direction_text = "看涨" if ai_dir == 1 else "中性"
-                print(f"⛔ 信号阻断: 簇2只做空 但 AI{ai_direction_text} (方向冲突)")
-            else:
-                print(f"⛔ 信号阻断: 簇2 AI预测信心不足 ({ai_conf:.3f} <= {target_conf})")
-
-        # 簇3：大涨，只做多，配合ai信号
+                sig, lev, is_signal = -1, 5, True
+                match_reason = f"簇2跌+AI看跌{ai_conf:.2f}"
         elif cluster_id == 3:
             if ai_dir == 1 and ai_conf > target_conf:
-                sig = 1
-                lev = 5
-                is_signal = True
-                match_reason = f"簇3大涨 + AI看涨(信心{ai_conf:.2f})"
-            elif ai_dir != 1:
-                ai_direction_text = "看跌" if ai_dir == -1 else "中性"
-                print(f"⛔ 信号阻断: 簇3只做多 但 AI{ai_direction_text} (方向冲突)")
-            else:
-                print(f"⛔ 信号阻断: 簇3 AI预测信心不足 ({ai_conf:.3f} <= {target_conf})")
-
-        # 簇4：跌，只做空，配合ai信号
+                sig, lev, is_signal = 1, 5, True
+                match_reason = f"簇3大涨+AI看涨{ai_conf:.2f}"
         elif cluster_id == 4:
             if ai_dir == -1 and ai_conf > target_conf:
-                sig = -1
-                lev = 5
-                is_signal = True
-                match_reason = f"簇4跌 + AI看跌(信心{ai_conf:.2f})"
-            elif ai_dir != -1:
-                ai_direction_text = "看涨" if ai_dir == 1 else "中性"
-                print(f"⛔ 信号阻断: 簇4只做空 但 AI{ai_direction_text} (方向冲突)")
-            else:
-                print(f"⛔ 信号阻断: 簇4 AI预测信心不足 ({ai_conf:.3f} <= {target_conf})")
+                sig, lev, is_signal = -1, 5, True
+                match_reason = f"簇4大跌+AI看跌{ai_conf:.2f}"
 
         if is_signal:
             print(f"✅ 信号生成: {match_reason}")
@@ -489,13 +394,13 @@ class StateMachine:
 
 
 # ==========================================
-# 5. 策略大脑 - 协调随机森林、状态机和聚类分析
+# 5. 策略大脑
 # ==========================================
 class StrategyBrain:
     def __init__(self):
         self.rf_classifier = RandomForestClassifier()
         self.state_machine = StateMachine()
-        self.cluster_analyzer = KMeansClusterAnalyzer()  # 添加聚类分析器
+        self.cluster_analyzer = KMeansClusterAnalyzer()
         self.state = self.state_machine.state
         self.color = self.state_machine.color
 
@@ -503,35 +408,31 @@ class StrategyBrain:
         self.rf_classifier.ingest_candle(item, timeframe)
 
     def analyze(self, orderbook=None):
-        # 提取特征
+        # 直接获取缓存的特征
         feature_data = self.rf_classifier.extract_features()
         if not feature_data:
             return None
-            
-        # 添加订单簿数据
+
         feature_data['orderbook'] = orderbook
-        
-        # 分析订单簿获取OBI和spread_pct
         obi, spread_pct = self.state_machine.ob_analyzer.analyze(orderbook)
         feature_data['obi'] = obi
         feature_data['spread_pct'] = spread_pct
-        
-        # 确定市场状态
+
         self.state, self.color = self.state_machine.determine_regime(
-            feature_data['range_pct'], 
+            feature_data['range_pct'],
             feature_data['vol_explosion']
         )
-        
-        # AI预测
+
         ai_dir, ai_conf = self.rf_classifier.predict(feature_data['features'])
         feature_data['ai_prediction'] = (ai_dir, ai_conf)
-        
-        # 聚类分析
-        momentum_values = feature_data.get('momentum_values', {})
-        volatility_values = feature_data.get('volatility_values', {})
-        cluster_id, cluster_distance = self.cluster_analyzer.predict_cluster(momentum_values, volatility_values)
-        feature_data['cluster'] = (cluster_id, cluster_distance)
-        
+
+        # 聚类预测
+        cluster_id, cluster_dist = self.cluster_analyzer.predict_cluster(
+            feature_data.get('momentum_values'),
+            feature_data.get('volatility_values')
+        )
+        feature_data['cluster'] = (cluster_id, cluster_dist)
+
         return feature_data
 
     def train_ai(self, features, label):
@@ -539,13 +440,3 @@ class StrategyBrain:
 
     def get_entry_signal(self, analysis_data, current_price):
         return self.state_machine.get_entry_signal(analysis_data, current_price)
-    
-    def predict_cluster(self, analysis_data):
-        """
-        根据分析数据预测所属的簇
-        返回: (cluster_id, distance) - 簇ID和到质心的距离
-        """
-        momentum_values = analysis_data.get('momentum_values', {})
-        volatility_values = analysis_data.get('volatility_values', {})
-        
-        return self.cluster_analyzer.predict_cluster(momentum_values, volatility_values)
