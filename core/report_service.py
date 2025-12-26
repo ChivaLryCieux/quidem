@@ -68,6 +68,37 @@ def generate_equity_curve(trades, save_dir):
     plt.close(fig)
     return f"data:image/png;base64,{img_str}"
 
+
+def process_trades_to_csv(trades, save_dir):
+    """
+    将交易记录转换为 CSV 文件并保存
+    """
+    if not trades:
+        return None, None
+
+    # 将列表转换为 DataFrame
+    df = pd.DataFrame(trades)
+
+    # 简单的格式化处理：将时间戳转换为可读时间
+    if 'entry_time' in df.columns:
+        df['entry_time_dt'] = pd.to_datetime(df['entry_time'], unit='ms')
+    if 'exit_time' in df.columns:
+        df['exit_time_dt'] = pd.to_datetime(df['exit_time'], unit='ms')
+
+    # 如果 snapshots 数据太大，可以选择在 CSV 中移除它，保持表格整洁
+    # if 'snapshots' in df.columns:
+    #     df = df.drop(columns=['snapshots'])
+
+    # 生成文件名
+    filename = f"trades_export_{int(time.time())}.csv"
+    filepath = os.path.join(save_dir, filename)
+
+    # 保存文件
+    df.to_csv(filepath, index=False, encoding='utf-8-sig')
+
+    return filepath, filename
+
+
 def generate_sparkline(snapshots, trade_id, save_dir):
     if not snapshots or len(snapshots) < 2: return None
     df = pd.DataFrame(snapshots)
