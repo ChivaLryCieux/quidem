@@ -42,6 +42,7 @@ class OrderBookAnalyzer:
         bids = orderbook['bids'][:TARGET_DEPTH]
         asks = orderbook['asks'][:TARGET_DEPTH]
         if not bids or not asks: return 0.0, 0.0
+        decay = 0.9
         w_bid_vol = sum(o[1] * (TARGET_DEPTH - i) / TARGET_DEPTH for i, o in enumerate(bids))
         w_ask_vol = sum(o[1] * (TARGET_DEPTH - i) / TARGET_DEPTH for i, o in enumerate(asks))
         total_vol = w_bid_vol + w_ask_vol + 1e-9
@@ -59,7 +60,14 @@ class RandomForestClassifier:
         # --- 大脑 1: 随机森林 (稳健派，擅长复杂结构) ---
         self.rf_model = compose.Pipeline(
             preprocessing.StandardScaler(),
-            AdaptiveRandomForestClassifier(n_models=10, seed=42)
+            AdaptiveRandomForestClassifier(
+                n_models =30,
+                max_depth =12,
+                split_criterion ="hellinger",
+                grace_period = 50,
+                lambda_value = 6,
+                seed =42
+            )
         )
 
         # --- 大脑 2: 在线线性模型 (激进派，擅长线性趋势) ---
@@ -72,7 +80,7 @@ class RandomForestClassifier:
         # 状态变量
         self.last_close_price = None
         self.training_features_buffer = None
-        self.history = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        self.history = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume','taker_buy'])
 
         # 训练计数器
         self.train_count = 0
@@ -97,14 +105,16 @@ class RandomForestClassifier:
         self.bocpd = OnlineBOCPD()
         self.cached_analysis_data = None
 
-    def ingest_candle(self, candle, timeframe='1m'):
+    def ingest_candle(self, candle, timeframe='1m', btc_change_pct=0.0, obi_value=0.0):
         """
         处理新K线数据，维护历史列表
         """
         if timeframe == '1m':
-            timestamp, open_, high, low, close, vol = candle
-            new_row = pd.DataFrame([[timestamp, open_, high, low, close, vol]],
-                                   columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            if len(candle) == 6:
+                candle.append(candle[5] * 0.5)
+            timestamp, open_, high, low, close, vol, taker_buy_vol = candle
+            new_row = pd.DataFrame([[timestamp, open_, high, low, close, vol, taker_buy_vol]],
+                                   columns=['timestamp', 'open', 'high', 'low', 'close', 'volume','taker_buy'])
 
             # 维护历史数据窗口 (500根)
             if self.history.empty:
@@ -125,9 +135,9 @@ class RandomForestClassifier:
                 self.hf_predictor_1m.learn_one(X_hf, y_true)
 
             # 计算所有复杂特征并缓存
-            self._recalculate_and_cache_features(close)
+            self._recalculate_and_cache_features(close, btc_change_pct, obi_value)
 
-    def _recalculate_and_cache_features(self, curr_price):
+    def _recalculate_and_cache_features(self, curr_price, btc_change_pct=0.0, obi_value=0.0):
         """
         计算复杂的数学特征
         """
@@ -158,18 +168,55 @@ class RandomForestClassifier:
         hf_diff = (curr_price - hf_val) / hf_val
         prev_atr = MathUtils.calc_atr(self.history.iloc[:-1]).iloc[-1]
         vol_expl = (self.history['high'].iloc[-1] - self.history['low'].iloc[-1]) / (prev_atr + 1e-9)
+        # [新增] 计算主动买卖压力特征
+        # 获取当前K线的总成交量和主动买入量
+        curr_vol = self.history['volume'].iloc[-1]
+        curr_taker_buy = self.history['taker_buy'].iloc[-1]
+
+        # 计算买入比例 (0.0 ~ 1.0)
+        # 如果是 0.5 代表买卖平衡，>0.5 代表买方强，<0.5 代表卖方强
+        buy_ratio = curr_taker_buy / (curr_vol + 1e-9)
+
+        # 将其转换为 -1 到 1 的压力值，方便 AI 理解
+        # 结果 > 0 说明有人主动买， < 0 说明有人主动卖
+        buy_pressure = (buy_ratio - 0.5) * 2.0
+
+        # [新增] 也可以计算量的变化率（量比），辅助判断是否放量
+        # 简单计算：当前量 / 过去5根均量
+        vol_ma5 = self.history['volume'].rolling(5).mean().iloc[-1]
+        vol_ratio = curr_vol / (vol_ma5 + 1e-9)
+
+        # 1. BTC 动量 (放大 1000 倍让数值不至于太小)
+        btc_mom = btc_change_pct * 1000
+
+        # 2. Alpha (超额收益): XRP 涨幅 - BTC 涨幅
+        # 如果 > 0，说明 XRP 比 BTC 强 (独立行情)
+        # 如果 < 0，说明 XRP 比 BTC 弱 (跟跌不跟涨)
+        xrp_change = (curr_price - self.last_close_price) / self.last_close_price if self.last_close_price else 0.0
+        alpha = (xrp_change - btc_change_pct) * 1000
 
         # 4. 组装特征向量 (numpy array)
         def get_val(d, k): return d.get(k, 0.0) if d.get(k) is not None else 0.0
 
         features = np.array([
-            hf_diff, eg_vol * 1000, rsi / 100.0, vol_expl, range_pct,
-                     (curr_price - wav_res) / curr_price * 100, np.log1p(wav_eng),
+            hf_diff,
+            eg_vol * 1000,
+            rsi / 100.0,
+            vol_expl,
+            range_pct,
+            (curr_price - wav_res) / curr_price * 100,
+            np.log1p(wav_eng),
             get_val(momentums, 'T_5'), get_val(momentums, 'T_10'),
             get_val(momentums, 'T_25'), get_val(momentums, 'T_50'),
             get_val(volatilities, 'T_5'), get_val(volatilities, 'T_10'),
             get_val(volatilities, 'T_25'), get_val(volatilities, 'T_50'),
-            self.price_prediction_diff, hurst, cp_prob
+            self.price_prediction_diff, hurst, cp_prob,
+
+            buy_pressure,  # 主动买卖意愿 (-1 ~ 1)
+            np.log1p(vol_ratio),  # 量比 (放量程度)
+            btc_mom,
+            alpha,
+            obi_value
         ]).reshape(1, -1)
 
         # 5. 存入缓存
@@ -227,27 +274,31 @@ class RandomForestClassifier:
             # --- A. 计算真实涨跌 ---
             price_diff_pct = (current_close_price - self.last_close_price) / self.last_close_price
 
-            # --- B. 动态 ATR 阈值 (保持 0.3 系数) ---
-            atr_val = closed_candle_analysis.get('atr', 0.0)
-            if atr_val > 0:
-                dynamic_threshold = (atr_val / self.last_close_price) * 0.3
-            else:
-                dynamic_threshold = 0.0005
+            # 硬性门槛：至少覆盖成本 (0.0015 = 0.15%)
+            COST_THRESHOLD = 0.0015
 
-            # --- C. 打标签 ---
+            atr_val = closed_candle_analysis.get('atr', 0.0)
+
+            # 动态门槛：ATR 的 0.5 倍
+            if atr_val > 0:
+                dynamic_threshold = max((atr_val / self.last_close_price) * 0.5, COST_THRESHOLD)
+            else:
+                dynamic_threshold = COST_THRESHOLD
+
             label = 0
             if price_diff_pct > dynamic_threshold:
                 label = 1
             elif price_diff_pct < -dynamic_threshold:
                 label = -1
 
-            # --- D. 双核训练 ---
+
+
             x = {f"f{i}": v for i, v in enumerate(self.training_features_buffer.flatten())}
 
-            # 1. 训练随机森林
             self.rf_model.learn_one(x, label)
-            # 2. 训练线性模型 (这是新增的!)
-            self.linear_model.learn_one(x, label)
+
+            if label != 0:
+                self.linear_model.learn_one(x, label)
 
             self.train_count += 1
 
@@ -261,8 +312,6 @@ class RandomForestClassifier:
 
     def extract_features(self):
         return self.cached_analysis_data
-
-    # [修复] 删除了此处之后的所有重复代码...
 
 
 # ==========================================
@@ -432,8 +481,8 @@ class StrategyBrain:
         self.state = self.state_machine.state
         self.color = self.state_machine.color
 
-    def ingest_candle(self, item, timeframe='1m'):
-        self.rf_classifier.ingest_candle(item, timeframe)
+    def ingest_candle(self, item, timeframe='1m', btc_change_pct=0.0, obi_value=0.0):
+        self.rf_classifier.ingest_candle(item, timeframe, btc_change_pct, obi_value)
 
     def analyze(self, orderbook=None):
         feature_data = self.rf_classifier.extract_features()

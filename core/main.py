@@ -59,6 +59,7 @@ class QuantBot:
         self.current_candle_timestamp = 0
         self.last_tick_analysis = None
         self.last_tick_price = 0.0
+        self.last_btc_price = 0.0
 
     def run(self):
         self.ui.log_startup(self.mode_name)
@@ -121,13 +122,28 @@ class QuantBot:
 
     def _tick(self):
         # 1. 从本地缓存获取最新数据
-        curr_candle_1m, curr_candle_15m, book, funding_rate = self.exchange.get_latest_data()
+        curr_candle_1m, curr_candle_15m, book, funding_rate, curr_btc_price = self.exchange.get_latest_data()
         if not curr_candle_1m: return
 
         timestamp = curr_candle_1m[0]
         curr_price = float(curr_candle_1m[4])
 
         # === K线收盘检测与增量学习 ===
+
+        if self.last_btc_price == 0:
+            self.last_btc_price = curr_btc_price
+
+        btc_change_pct = 0.0
+        if self.last_btc_price > 0:
+            btc_change_pct = (curr_btc_price - self.last_btc_price) / self.last_btc_price
+
+        # 更新记录
+        self.last_btc_price = curr_btc_price
+
+        current_obi = 0.0
+        if book:
+            current_obi, _ = self.brain.state_machine.ob_analyzer.analyze(book)
+
         if self.current_candle_timestamp == 0:
             self.current_candle_timestamp = timestamp
 
@@ -138,7 +154,7 @@ class QuantBot:
             self.current_candle_timestamp = timestamp
 
         # 2. 实时送入 Brain
-        self.brain.ingest_candle(curr_candle_1m, '1m')
+        self.brain.ingest_candle(curr_candle_1m, '1m', btc_change_pct=btc_change_pct,obi_value=current_obi)
         if curr_candle_15m:
             self.brain.ingest_candle(curr_candle_15m, '15m')
 

@@ -68,7 +68,7 @@ class MarketDataStreamer(threading.Thread):
         self.daemon = True
         self.ws = None
         # 订阅1m和15m K线，以及深度和标记价格
-        self.url = f"wss://fstream.binance.com/stream?streams={Config.SYMBOL_WS}@kline_{Config.TIMEFRAME}/{Config.SYMBOL_WS}@kline_15m/{Config.SYMBOL_WS}@depth20@100ms/{Config.SYMBOL_WS}@markPrice"
+        self.url = f"wss://fstream.binance.com/stream?streams={Config.SYMBOL_WS}@kline_{Config.TIMEFRAME}/{Config.SYMBOL_WS}@kline_15m/{Config.SYMBOL_WS}@depth20@100ms/{Config.SYMBOL_WS}@markPrice/btcusdt@kline_1m"
 
         # 线程安全的数据存储
         self.lock = threading.Lock()
@@ -77,6 +77,7 @@ class MarketDataStreamer(threading.Thread):
             'kline_15m': None,  # 15分钟K线
             'orderbook': None,  # 深度
             'funding_rate': 0.0,  # 资金费率
+            'btc_price':0.0,    #BTC实时价格
             'is_ready': False
         }
         self.running = True
@@ -117,22 +118,20 @@ class MarketDataStreamer(threading.Thread):
             payload = msg.get('data')
 
             with self.lock:
-                # 1. K线数据处理 - 区分1m和15m
+                # 1. K线数据处理
                 if 'kline' in stream:
                     k = payload['k']
-                    # 转换成标准格式: [timestamp, open, high, low, close, volume]
                     kline_data = [
-                        k['t'],  # Timestamp
-                        float(k['o']),  # Open
-                        float(k['h']),  # High
-                        float(k['l']),  # Low
-                        float(k['c']),  # Close
-                        float(k['v'])  # Volume
+                        k['t'], float(k['o']), float(k['h']), float(k['l']),
+                        float(k['c']), float(k['v']), float(k['Q'])
                     ]
-                    
-                    # 根据流名称区分存储
-                    if 'kline_1m' in stream:
+
+                    if 'btcusdt' in stream:
+                        self.data['btc_price'] = float(k['c'])
+
+                    elif 'kline_1m' in stream:
                         self.data['kline_1m'] = kline_data
+
                     elif 'kline_15m' in stream:
                         self.data['kline_15m'] = kline_data
 
@@ -231,7 +230,8 @@ class ExchangeService:
         kline_15m = data['kline_15m']
         book = data['orderbook']
         funding = data['funding_rate']
-        return kline_1m, kline_15m, book, funding
+        btc_price = data.get('btc_price', 0.0)
+        return kline_1m, kline_15m, book, funding,btc_price
 
     def get_precision_amount(self, amount, price):
         return float(self.client.amount_to_precision(self.symbol, amount))
