@@ -2,16 +2,16 @@
 回测器使用方法
 
 快速开始（默认使用 Binance U 本位合约数据源）：
-  python backtest/backtest.py --symbol XRP/USDT --balance 100
+  python backtest/backtester.py --symbol XRP/USDT --balance 100
 
 按最近 N 天回测：
-  python backtest/backtest.py --symbol XRP/USDT --lookback-days 30
+  python backtest/backtester.py --symbol XRP/USDT --lookback-days 30
 
 指定时间区间（本地时区由 pandas 解析，最终转为毫秒时间戳）：
-  python backtest/backtest.py --symbol XRP/USDT --since "2025-01-01" --end "2025-02-01"
+  python backtest/backtester.py --symbol XRP/USDT --since "2025-01-01" --end "2025-02-01"
 
 绘图与降采样（适合一年级别回测）：
-  python backtest/backtest.py --symbol XRP/USDT --lookback-days 365 --plot-resample 15T --plot-max-points 12000 --plot-dpi 180 --plot-figsize 16,9
+  python backtest/backtester.py --symbol XRP/USDT --lookback-days 365 --plot-resample 15T --plot-max-points 12000 --plot-dpi 180 --plot-figsize 16,9
 
 输出文件：
   默认输出到 backtest/outputs/YYYYMMDD_HHMMSS/
@@ -87,6 +87,13 @@ def _fetch_ohlcv(exchange, symbol, timeframe, limit, since=None):
     
     fetch_limit = 1000 
     current_since = since
+    if current_since is None:
+        try:
+            tf_sec = exchange.parse_timeframe(timeframe)
+            tf_ms = int(tf_sec * 1000)
+            current_since = int(exchange.milliseconds() - (int(limit) * tf_ms))
+        except Exception:
+            current_since = None
     
     retry_count = 0
     max_retries = 3
@@ -96,12 +103,23 @@ def _fetch_ohlcv(exchange, symbol, timeframe, limit, since=None):
         this_limit = min(left, fetch_limit)
         try:
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe, since=current_since, limit=this_limit)
+            if ohlcv:
+                ohlcv = [c[:6] for c in ohlcv if c is not None and len(c) >= 6]
             if not ohlcv:
                 break
             
             last_time = ohlcv[-1][0]
             if current_since is not None and last_time == current_since:
                 break
+
+            if all_ohlcv:
+                prev_last = all_ohlcv[-1][0]
+                if ohlcv[0][0] <= prev_last:
+                    ohlcv = [c for c in ohlcv if c[0] > prev_last]
+                    if not ohlcv:
+                        break
+                    last_time = ohlcv[-1][0]
+
             current_since = last_time + 1 
             
             all_ohlcv.extend(ohlcv)
@@ -486,8 +504,11 @@ class StrategyBacktesterUnified:
     def _plot(self):
         if not self.data_1m_cache: return
 
+        ohlcv_rows = [c[:6] for c in self.data_1m_cache if c is not None and len(c) >= 6]
+        if not ohlcv_rows:
+            return
         ohlcv_df = pd.DataFrame(
-            self.data_1m_cache,
+            ohlcv_rows,
             columns=["ts", "open", "high", "low", "close", "volume"]
         )
         ohlcv_df["ts"] = pd.to_datetime(ohlcv_df["ts"], unit="ms")
