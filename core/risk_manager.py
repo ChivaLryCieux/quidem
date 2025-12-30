@@ -50,8 +50,8 @@ class RiskManager:
         duration_min = duration_ms / 60000.0
         current_equity_pnl = raw_pnl_pct * Config.MAX_LEVERAGE
 
-        # 1. 如果达到本金+max{最小止盈距离，2倍ATR}，则止盈
-        profit_threshold = max(Config.MIN_TP_DISTANCE, 2 * atr / entry_price if atr > 0 else Config.MIN_TP_DISTANCE)
+        # 1. 如果达到本金+max{1美元，最小止盈距离，2倍ATR}，则止盈
+        profit_threshold = max(1.0, Config.MIN_TP_DISTANCE, 2 * atr if atr > 0 else Config.MIN_TP_DISTANCE)
         if raw_pnl_pct >= profit_threshold:
             return True, f"💰 TargetProfit({profit_threshold*100:.2f}%)"
 
