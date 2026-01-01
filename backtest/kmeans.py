@@ -7,6 +7,9 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 import os
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ==========================================
 # 1. 配置区域 (User Configuration)
@@ -32,8 +35,8 @@ PROXIES = {
 # ==========================================
 def fetch_binance_data(symbol, timeframe, target_limit, warmup_buffer, proxies):
     total_fetch_size = target_limit + warmup_buffer
-    print(f"正在连接币安拉取 {symbol} {timeframe}...")
-    print(f"目标有效K线: {target_limit}, 预热缓冲: {warmup_buffer}, 总拉取: {total_fetch_size}")
+    logger.info(f"正在连接币安拉取 {symbol} {timeframe}...")
+    logger.info(f"目标有效K线: {target_limit}, 预热缓冲: {warmup_buffer}, 总拉取: {total_fetch_size}")
 
     try:
         exchange = ccxt.binanceusdm({
@@ -62,11 +65,11 @@ def fetch_binance_data(symbol, timeframe, target_limit, warmup_buffer, proxies):
         df = df[~df.index.duplicated(keep='first')]
         df = df.tail(total_fetch_size)
 
-        print(f"成功拉取并合并 {len(df)} 条K线数据")
+        logger.info(f"成功拉取并合并 {len(df)} 条K线数据")
         return df
 
     except Exception as e:
-        print(f"Error fetching data: {e}")
+        logger.error(f"Error fetching data: {e}")
         return pd.DataFrame()
 
 
@@ -101,7 +104,7 @@ def calculate_features(df, windows):
 # 4. 聚类与分析 (Clustering & Analysis)
 # ==========================================
 def run_clustering_analysis(df, feature_cols, n_clusters):
-    print("正在执行 K-Means 聚类...")
+    logger.info("正在执行 K-Means 聚类...")
     X = df[feature_cols].values
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
@@ -117,11 +120,11 @@ def run_clustering_analysis(df, feature_cols, n_clusters):
     
     backtest_centroids_path = os.path.join(os.path.dirname(__file__), 'centroids.csv')
     cluster_means.to_csv(backtest_centroids_path)
-    print(f"聚类质心已保存到: {backtest_centroids_path}")
+    logger.info(f"聚类质心已保存到: {backtest_centroids_path}")
     
     core_centroids_path = os.path.join(os.path.dirname(__file__), '..', 'core', 'centroids.csv')
     cluster_means.to_csv(core_centroids_path)
-    print(f"聚类质心已同步到: {core_centroids_path}")
+    logger.info(f"聚类质心已同步到: {core_centroids_path}")
 
     return df, stats, cluster_means
 
@@ -130,7 +133,7 @@ def run_clustering_analysis(df, feature_cols, n_clusters):
 # 5. 马尔可夫链 (Markov Chain)
 # ==========================================
 def calculate_transition_matrix(df, n_clusters):
-    print("正在计算马尔可夫转移矩阵...")
+    logger.info("正在计算马尔可夫转移矩阵...")
     df['next_cluster'] = df['cluster'].shift(-1)
     valid_transitions = df.dropna(subset=['next_cluster'])
 
@@ -191,7 +194,7 @@ def plot_results_custom(df, transition_probs, n_clusters):
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     plot_path = os.path.join(os.path.dirname(__file__), f'kmeans_{timestamp}.png')
     plt.savefig(plot_path, dpi=150, bbox_inches='tight')
-    print(f"聚类分析图表已保存到: {plot_path}")
+    logger.info(f"聚类分析图表已保存到: {plot_path}")
     plt.show()
 
 
@@ -203,13 +206,13 @@ def main():
     if df.empty: return
 
     df_features, feature_list = calculate_features(df, WINDOWS)
-    print("\n--- 特征计算完毕 (已启用对数动量) ---")
+    logger.info("--- 特征计算完毕 (已启用对数动量) ---")
 
     df_clustered, stats, means = run_clustering_analysis(df_features, feature_list, N_CLUSTERS)
-    print("\n--- 聚类统计 ---")
-    print(stats)
-    print("\n--- 聚类中心 (对数动量) ---")
-    print(means)
+    logger.info("--- 聚类统计 ---")
+    logger.info(f"\n{stats}")
+    logger.info("--- 聚类中心 (对数动量) ---")
+    logger.info(f"\n{means}")
 
     trans_matrix = calculate_transition_matrix(df_clustered, N_CLUSTERS)
     plot_results_custom(df_clustered, trans_matrix, N_CLUSTERS)

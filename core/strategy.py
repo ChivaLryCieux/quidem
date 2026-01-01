@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import os
 import sys
+import logging
 from colorama import Fore, Style
 
 # ==========================================
@@ -29,6 +30,8 @@ except ImportError as e:
 from config import Config
 from math_tools import MathUtils, HInfinityFilter1D, OnlineEGARCH, WaveletAnalyzer, MomentumCalculator, \
     RollingVolatilityCalculator, FractalAnalysis, OnlineBOCPD
+
+logger = logging.getLogger(__name__)
 
 
 # ==========================================
@@ -327,7 +330,7 @@ class KMeansClusterAnalyzer:
         # 加载CSV
         centroids_path = os.path.join(os.path.dirname(__file__), 'centroids.csv')
         if not os.path.exists(centroids_path):
-            print(f"{Fore.RED}错误: 未找到 centroids.csv 文件{Fore.RESET}")
+            logger.error("未找到 centroids.csv 文件")
             sys.exit(1)
         try:
             centroids_df = pd.read_csv(centroids_path, index_col=0)
@@ -465,7 +468,7 @@ class StateMachine:
                 match_reason = f"簇4大跌+AI看跌{ai_conf:.2f}"
 
         if is_signal:
-            print(f"✅ 信号生成: {match_reason}")
+            logger.info(f"信号生成: {match_reason}")
 
         return sig, lev
 

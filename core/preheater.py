@@ -5,7 +5,10 @@ import ccxt
 import aiohttp
 import joblib
 import pandas as pd
+import logging
 from colorama import Fore, Style
+
+logger = logging.getLogger(__name__)
 
 root = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(root)
@@ -112,20 +115,20 @@ def run(warmup_1m=1000, warmup_15m=300):
     acc = (correct / total_val) * 100 if total_val > 0 else 0.0
     signal_ratio = ((label_stats[1] + label_stats[-1]) / len(ohlcv_15m)) * 100 if len(ohlcv_15m) > 0 else 0.0
 
-    print("=" * 40)
-    print(f"{Fore.GREEN}预热报告{Style.RESET_ALL}")
-    print(f"样本数: {len(ohlcv_15m)}")
-    print(f"标签分布: 多({label_stats[1]}) | 空({label_stats[-1]}) | 观({label_stats[0]})")
-    print(f"有效信号占比: {signal_ratio:.1f}%")
-    print(f"预测准确率(Prequential): {acc:.2f}%")
-    print("=" * 40)
+    logger.info("=" * 40)
+    logger.info(f"预热报告")
+    logger.info(f"样本数: {len(ohlcv_15m)}")
+    logger.info(f"标签分布: 多({label_stats[1]}) | 空({label_stats[-1]}) | 观({label_stats[0]})")
+    logger.info(f"有效信号占比: {signal_ratio:.1f}%")
+    logger.info(f"预测准确率(Prequential): {acc:.2f}%")
+    logger.info("=" * 40)
 
     if signal_ratio < 10:
-        print(f"{Fore.RED}警告: 信号稀疏，考虑降低 Config.LABEL_ATR_MULT{Style.RESET_ALL}")
+        logger.warning("信号稀疏，考虑降低 Config.LABEL_ATR_MULT")
     if acc < 40:
-        print(f"{Fore.YELLOW}提示: 准确率较低，可能需要更多预热数据{Style.RESET_ALL}")
+        logger.warning("准确率较低，可能需要更多预热数据")
     if label_stats[1] == 0 or label_stats[-1] == 0:
-        print(f"{Fore.RED}错误: 单边标签未出现，增加 warmup_15m{Style.RESET_ALL}")
+        logger.error("单边标签未出现，增加 warmup_15m")
 
 if __name__ == "__main__":
     run()

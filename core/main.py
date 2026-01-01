@@ -2,6 +2,7 @@ import sys
 import time
 import redis
 import json
+import logging
 from colorama import init, Fore, Style
 
 # 导入所有拆分后的模块
@@ -9,8 +10,21 @@ from config import Config, ExchangeService
 from strategy import StrategyBrain
 from risk_manager import RiskManager
 from ui import DisplayManager, KeyListener
+from logging_config import setup_logging
 
 init(autoreset=True)
+
+# 配置日志系统
+setup_logging(
+    log_level=Config.LOG_LEVEL,
+    log_dir=Config.LOG_DIR,
+    log_file=Config.LOG_FILE,
+    console_output=Config.LOG_TO_CONSOLE,
+    max_bytes=Config.LOG_MAX_BYTES,
+    backup_count=Config.LOG_BACKUP_COUNT
+)
+
+logger = logging.getLogger(__name__)
 
 
 # ==========================================
@@ -23,7 +37,7 @@ class QuantBot:
         self.key_listener = KeyListener()
 
         # 用户选择模式
-        print(f"请选择模式: [0] 退出 | [1] 模拟盘 (Paper) | [2] 实盘 (Live)")
+        logger.info(f"请选择模式: [0] 退出 | [1] 模拟盘 (Paper) | [2] 实盘 (Live)")
         mode = input("请输入数字: ").strip()
         if mode == '0': sys.exit(0)
         self.is_live = (mode == '2')
@@ -43,9 +57,9 @@ class QuantBot:
             try:
                 self.redis_client = redis.Redis(host='localhost', port=6379, db=0)
                 self.redis_client.ping()
-                print(f"{Fore.GREEN}邮件服务已连接 {Style.RESET_ALL}")
+                logger.info("邮件服务已连接")
             except Exception as e:
-                print(f"{Fore.RED}邮件服务连接失败 {e}{Style.RESET_ALL}")
+                logger.error(f"邮件服务连接失败 {e}")
                 self.redis_client = None
 
         # 交易状态
@@ -115,9 +129,8 @@ class QuantBot:
                 self._exit_procedure()
             except Exception as e:
                 import traceback
-                print(f"{Fore.RED}Loop Error: {e}")
+                logger.error(f"Loop Error: {e}")
                 traceback.print_exc()
-                print(f"{Style.RESET_ALL}")
                 time.sleep(1)
 
     def _tick(self):
@@ -149,7 +162,7 @@ class QuantBot:
 
         if timestamp > self.current_candle_timestamp:
             if self.last_tick_analysis is not None:
-                print(f"{Fore.MAGENTA}[Candle Close] K线收盘: {self.current_candle_timestamp} -> {timestamp}{Style.RESET_ALL}")
+                logger.info(f"[Candle Close] K线收盘: {self.current_candle_timestamp} -> {timestamp}")
                 self.brain.on_candle_close(self.last_tick_analysis, self.last_tick_price)
             self.current_candle_timestamp = timestamp
 
@@ -327,7 +340,7 @@ class QuantBot:
                     }
                     self.redis_client.rpush('trade_journal_pending', json.dumps(trade_record))
                 except Exception as e:
-                    print(f"{Fore.RED}[邮件发送失败] Redis 错误: {e}{Style.RESET_ALL}")
+                    logger.error(f"[邮件发送失败] Redis 错误: {e}")
 
             self.trade_snapshots = []
             self.last_snapshot_time = 0
@@ -335,7 +348,7 @@ class QuantBot:
 
     def _check_user_input(self):
         if self.key_listener.is_q_pressed():
-            print(f"\n{Fore.YELLOW}=== ⏸ 暂停 === [0] 平仓退出 | [Enter] 继续{Style.RESET_ALL}")
+            logger.warning("=== ⏸ 暂停 === [0] 平仓退出 | [Enter] 继续")
             choice = self.key_listener.safe_input("指令 > ").strip()
             if choice == '0':
                 self._exit_procedure()
@@ -343,7 +356,7 @@ class QuantBot:
     def _exit_procedure(self):
         self.exchange.close()
         if self.position['size'] != 0:
-            print("正在平仓并退出...")
+            logger.info("正在平仓并退出...")
             self._execute_exit("手动退出", 0.0, 0.0)
         sys.exit(0)
 

@@ -10,7 +10,10 @@ import base64
 import io
 import os
 import numpy as np
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # === 配置区域 ===
 os.environ["HTTP_PROXY"] = "http://127.0.0.1:7890"
@@ -420,5 +423,5 @@ schedule.every().day.at("23:00").do(send_digest)
 
 if __name__ == "__main__":
     if not os.path.exists(ARCHIVE_DIR): os.makedirs(ARCHIVE_DIR)
-    print(f"=== 报告服务 (Equity Curve & Risk Analysis) 已启动 ===")
+    logger.info("=== 报告服务 (Equity Curve & Risk Analysis) 已启动 ===")
     while True: schedule.run_pending(); time.sleep(1)

@@ -3,8 +3,11 @@ import sys
 import threading
 import queue
 import time
+import logging
 from colorama import Fore, Style
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 # 跨平台按键检测依赖
 if os.name == 'nt':
@@ -44,14 +47,11 @@ class DisplayManager:
     def log_entry(self, regime, color, side, leverage, obi, price, sl, tp):
         sys.stdout.write("\r\033[K")  # 清除当前行
         dir_str = "开多" if side == 1 else "开空"
-        print(f"{color}>>> ⚡️ {regime} | {dir_str} | {leverage}x | OBI:{obi:.2f}{Style.RESET_ALL}")
-        print(f"    🎯 TP: {tp:.4f} | 🛡️ SL: {sl:.4f}")
+        logger.info(f"{regime} | {dir_str} | {leverage}x | OBI:{obi:.2f} | TP:{tp:.4f} | SL:{sl:.4f}")
 
     def log_exit(self, reason, price, pnl, fee, balance, extra=""):
         sys.stdout.write("\r\033[K")  # 清除当前行
-        pnl_color = Fore.GREEN if pnl >= 0 else Fore.RED
-        print(
-            f"{reason} | P:{price} | PnL:{pnl_color}{pnl:+.2f}{Style.RESET_ALL} (Fee:-{fee:.2f}) | Bal:${balance:.2f} {extra}")
+        logger.info(f"{reason} | P:{price} | PnL:{pnl:+.2f} (Fee:-{fee:.2f}) | Bal:${balance:.2f} {extra}")
 
     def update_status(self, pos, regime, color, obi, pnl, price, hf_pred_1m, hf_pred_diff, ai_conf, cluster_id=5):
         status_icon = "🟢" if pos > 0 else "🔴" if pos < 0 else "⚪"

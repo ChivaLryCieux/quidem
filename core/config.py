@@ -5,7 +5,10 @@ import copy
 import threading
 import websocket
 import ccxt
+import logging
 from colorama import Fore, Style
+
+logger = logging.getLogger(__name__)
 
 # ==========================================
 # 1. 配置管理类
@@ -49,7 +52,15 @@ class Config:
     BACKTEST_FUNDING_RATE_PCT = 0.0000  # 回测资金费率（百分比），正数对多仓扣费、对空仓加费；负数相反
 
     #邮件报告开关
-    ENABLE_MAIL_REPORT =False
+    ENABLE_MAIL_REPORT = False
+
+    # 日志配置
+    LOG_LEVEL = 'INFO'
+    LOG_DIR = 'logs'
+    LOG_FILE = 'quant_bot.log'
+    LOG_TO_CONSOLE = True
+    LOG_MAX_BYTES = 10 * 1024 * 1024  # 10MB
+    LOG_BACKUP_COUNT = 5
 
     @staticmethod
     def setup_proxy():
@@ -105,7 +116,7 @@ class MarketDataStreamer(threading.Thread):
 
                 self.ws.run_forever(**proxy_opts)
             except Exception as e:
-                print(f"{Fore.RED}[WS Error] {e} - Reconnecting in 5s...{Style.RESET_ALL}")
+                logger.error(f"WS Error: {e} - Reconnecting in 5s...")
                 time.sleep(5)
 
     def _on_open(self, ws):
@@ -194,7 +205,7 @@ class ExchangeService:
             self.client.load_markets()
             # 启动 WebSocket 线程
             self.ws_streamer.start()
-            print(f"{Fore.CYAN}[System] Waiting for WS data stream...{Style.RESET_ALL}")
+            logger.info("Waiting for WS data stream...")
 
             # 等待 WebSocket 预热
             timeout = 0
@@ -242,7 +253,7 @@ class ExchangeService:
             self.client.create_market_order(self.symbol, side, amount, params=params)
             return True
         except Exception as e:
-            print(f"{Fore.RED}[Order Error] {e}{Style.RESET_ALL}")
+            logger.error(f"Order Error: {e}")
             return False
 
     def close(self):
