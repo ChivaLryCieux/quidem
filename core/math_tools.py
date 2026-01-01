@@ -161,7 +161,7 @@ class MomentumCalculator:
 
 
 
-class RealizedVolatilityCalculator:
+class RollingVolatilityCalculator:
     def __init__(self, periods=[5, 10, 25, 50]):
         self.periods = periods
 
@@ -170,7 +170,7 @@ class RealizedVolatilityCalculator:
 
     def calculate_all_volatilities(self, prices_list):
         """
-        [修复] 专门处理从列表传入的价格数据
+        专门处理从列表传入的价格数据
         计算不同窗口期(5, 10, 25, 50)的实际波动率
         """
         results = {}

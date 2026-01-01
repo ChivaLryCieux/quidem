@@ -28,7 +28,7 @@ except ImportError as e:
 
 from config import Config
 from math_tools import MathUtils, HInfinityFilter1D, OnlineEGARCH, WaveletAnalyzer, MomentumCalculator, \
-    RealizedVolatilityCalculator, FractalAnalysis, OnlineBOCPD
+    RollingVolatilityCalculator, FractalAnalysis, OnlineBOCPD
 
 
 # ==========================================
@@ -100,7 +100,7 @@ class RandomForestClassifier:
         self.hf = HInfinityFilter1D()
         self.egarch = OnlineEGARCH()
         self.momentum_calc = MomentumCalculator()
-        self.volatility_calc = RealizedVolatilityCalculator()
+        self.volatility_calc = RollingVolatilityCalculator()
         self.fractal_analysis = FractalAnalysis()
         self.bocpd = OnlineBOCPD()
         self.cached_analysis_data = None
