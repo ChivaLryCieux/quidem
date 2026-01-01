@@ -5,7 +5,6 @@ import json
 import logging
 from colorama import init, Fore, Style
 
-# 导入所有拆分后的模块
 from config import Config, ExchangeService
 from strategy import StrategyBrain
 from risk_manager import RiskManager
