@@ -5,11 +5,13 @@ import json
 import logging
 from colorama import init, Fore, Style
 
-from config import Config, ExchangeService
-from strategy import StrategyBrain
-from risk_manager import RiskManager
-from ui import DisplayManager, KeyListener
-from logging_config import setup_logging
+from config.settings import Config
+from config.exchange import ExchangeService
+from strategy.brain import StrategyBrain
+from risk.manager import RiskManager
+from ui.display import DisplayManager
+from ui.input import KeyListener
+from utils.logging_config import setup_logging
 
 init(autoreset=True)
 
