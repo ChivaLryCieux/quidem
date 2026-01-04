@@ -3,9 +3,7 @@ import pandas as pd
 import logging
 from colorama import Fore, Style
 
-from config.settings import Config
-from models.ml_models import RandomForestClassifier
-from models.cluster import KMeansClusterAnalyzer
+from ..config.settings import Config
 
 logger = logging.getLogger(__name__)
 

@@ -199,7 +199,6 @@ class QuantBot:
         # 6. UI更新
         unrealized_pnl = (curr_price - self.position['entry_price']) * self.position['size'] if self.position['size'] != 0 else 0
 
-        # [修复] 获取 HF 预测值，改为获取 last_hf_prediction
         hf_pred_1m = getattr(self.brain.rf_classifier, 'last_hf_prediction', 0.0)
         hf_pred_diff = self.brain.rf_classifier.price_prediction_diff if analysis else 0.0
         ai_conf = analysis.get('ai_prediction', (0, 0.0))[1] if analysis else 0.0

@@ -1,11 +1,5 @@
 import os
-import time
-import json
-import copy
-import threading
-import websocket
 import logging
-from colorama import Fore, Style
 
 logger = logging.getLogger(__name__)
 

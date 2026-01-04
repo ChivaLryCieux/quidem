@@ -3,16 +3,16 @@ import pandas as pd
 import logging
 from colorama import Fore, Style
 
-from models.ml_models import RandomForestClassifier
-from models.cluster import KMeansClusterAnalyzer
-from strategy.analyzers import OrderBookAnalyzer, StateMachine
-from strategy.signals import SignalGenerator
+from ..models.ml_models import RandomForestClassifier
+from ..models.cluster import KMeansClusterAnalyzer
+from ..strategy.analyzers import OrderBookAnalyzer, StateMachine
+from ..strategy.signals import SignalGenerator
 
 logger = logging.getLogger(__name__)
 
 
 # ==========================================
-# 3. 策略大脑
+# 策略大脑
 # ==========================================
 class StrategyBrain:
     def __init__(self):

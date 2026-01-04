@@ -1,4 +1,4 @@
-from config import Config
+from ..config import Config
 
 class PortfolioManager:
     def __init__(self, initial_balance=100.0):
