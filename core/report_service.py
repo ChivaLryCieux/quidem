@@ -423,5 +423,16 @@ schedule.every().day.at("23:00").do(send_digest)
 
 if __name__ == "__main__":
     if not os.path.exists(ARCHIVE_DIR): os.makedirs(ARCHIVE_DIR)
+    print(f"当前代理配置: {os.environ.get('HTTP_PROXY')}")
+    print(">>> 报告服务已启动！正在后台监听 Redis 队列...")
+    print(">>> (程序不会自动退出，请按 Ctrl+C 停止")
     logger.info("=== 报告服务 (Equity Curve & Risk Analysis) 已启动 ===")
+    try:
+        r.ping()
+        print(">>> Redis 连接成功！")
+    except Exception as e:
+        print(f"❌ Redis 连接失败: {e}")
+        print("请确保服务器运行了: sudo systemctl start redis")
+        exit()
+
     while True: schedule.run_pending(); time.sleep(1)

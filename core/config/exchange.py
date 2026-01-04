@@ -6,7 +6,7 @@ import threading
 import websocket
 import ccxt
 import logging
-from settings import Config
+from .settings import Config
 from colorama import Fore, Style
 
 logger = logging.getLogger(__name__)

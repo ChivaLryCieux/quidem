@@ -1,4 +1,4 @@
-from ..config import Config
+from config import Config
 
 class PositionManager:
     def __init__(self):
