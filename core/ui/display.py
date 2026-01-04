@@ -2,7 +2,7 @@ import os
 import sys
 import logging
 from colorama import Fore, Style
-from config import Config
+from core.config import Config
 
 logger = logging.getLogger(__name__)
 

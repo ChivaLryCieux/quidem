@@ -1,5 +1,5 @@
 import time
-from config import Config
+from core.config import Config
 
 class RiskManager:
     def __init__(self):

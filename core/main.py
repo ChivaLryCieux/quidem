@@ -1,20 +1,18 @@
 import sys
 import os
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(BASE_DIR)
 import time
 import redis
 import json
 import logging
 from colorama import init, Fore, Style
 
-from config.settings import Config
-from config.exchange import ExchangeService
-from strategy.brain import StrategyBrain
-from risk.manager import RiskManager
-from ui.display import DisplayManager
-from ui.input import KeyListener
-from utils.logging_config import setup_logging
+from core.config.settings import Config
+from core.config.exchange import ExchangeService
+from core.strategy.brain import StrategyBrain
+from core.risk.manager import RiskManager
+from core.ui.display import DisplayManager
+from core.ui.input import KeyListener
+from core.utils.logging_config import setup_logging
 
 init(autoreset=True)
 

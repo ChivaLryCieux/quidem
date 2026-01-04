@@ -3,7 +3,7 @@ import pandas as pd
 import logging
 from colorama import Fore, Style
 
-from config.settings import Config
+from core.config.settings import Config
 
 logger = logging.getLogger(__name__)
 

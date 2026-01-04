@@ -3,10 +3,10 @@ import pandas as pd
 import logging
 from colorama import Fore, Style
 
-from models.ml_models import RandomForestClassifier
-from models.cluster import KMeansClusterAnalyzer
-from strategy.analyzers import OrderBookAnalyzer, StateMachine
-from strategy.signals import SignalGenerator
+from core.models.ml_models import RandomForestClassifier
+from core.models.cluster import KMeansClusterAnalyzer
+from core.strategy.analyzers import OrderBookAnalyzer, StateMachine
+from core.strategy.signals import SignalGenerator
 
 logger = logging.getLogger(__name__)
 

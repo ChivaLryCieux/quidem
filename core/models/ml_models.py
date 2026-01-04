@@ -21,9 +21,9 @@ except ImportError as e:
     print(e)
     sys.exit(1)
 
-from analysis.indicators import MathUtils
-from analysis.filters import HInfinityFilter1D, OnlineEGARCH, WaveletAnalyzer
-from analysis.transform import MomentumCalculator, RollingVolatilityCalculator, FractalAnalysis, OnlineBOCPD
+from core.analysis.indicators import MathUtils
+from core.analysis.filters import HInfinityFilter1D, OnlineEGARCH, WaveletAnalyzer
+from core.analysis.transform import MomentumCalculator, RollingVolatilityCalculator, FractalAnalysis, OnlineBOCPD
 
 logger = logging.getLogger(__name__)
 
