@@ -36,7 +36,7 @@ class DisplayManager:
         sys.stdout.write("\r\033[K")  # 清除当前行
         logger.info(f"{reason} | P:{price} | PnL:{pnl:+.2f} (Fee:-{fee:.2f}) | Bal:${balance:.2f} {extra}")
 
-    def update_status(self, pos, regime, color, obi, pnl, price, hf_pred_1m, hf_pred_diff, ai_conf, cluster_id=5):
+    def update_status(self, pos, regime, color, obi, pnl, price, hf_signal, ai_conf, cluster_id=5):
         status_icon = "🟢" if pos > 0 else "🔴" if pos < 0 else "⚪"
         pnl_c = Fore.GREEN if pnl >= 0 else Fore.RED
         cluster_display = f"C{cluster_id}"
@@ -44,8 +44,7 @@ class DisplayManager:
             f"{status_icon} {color}{regime:<10}{Style.RESET_ALL} | "
             f"OBI:{obi:+.2f} | "
             f"P:{price:.4f} | "
-            f"HFS:{hf_pred_1m:.4f} | "  # H-infinity Signal (not price prediction)
-            f"Df:{hf_pred_diff:+.4f} | "
+            f"HFS:{hf_signal:.4f} | "  # H-infinity Signal
             f"AI:{ai_conf:.2f} | "
             f"Cls:{cluster_display} | "
             f"PnL:{pnl_c}${pnl:+.2f}{Style.RESET_ALL}"
