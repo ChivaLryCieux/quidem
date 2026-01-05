@@ -57,11 +57,11 @@ class QuantBot:
 
         if Config.ENABLE_MAIL_REPORT:
             try:
-                self.redis_client = redis.Redis(host='localhost', port=6379, db=0)
+                self.redis_client = redis.Redis(host='localhost', port=6379, db=0, socket_timeout=1)
                 self.redis_client.ping()
                 logger.info("邮件服务已连接")
             except Exception as e:
-                logger.error(f"邮件服务连接失败 {e}")
+                logger.error(f"邮件服务连接失败: {e}")
                 self.redis_client = None
 
         # 交易状态
@@ -76,8 +76,11 @@ class QuantBot:
         self.last_tick_analysis = None
         self.last_tick_price = 0.0
         self.last_btc_price = 0.0
-        # 15分钟开仓检查时间戳 - 每15分钟才检查一次开仓机会
+
+        # 开仓控制相关变量
         self.last_position_check_timestamp = 0
+        self.last_traded_candle_timestamp = 0  # 防止同K线重复开仓
+        self.ENTRY_WINDOW_SECONDS = 45  # K线开始后45秒内允许开仓
 
     def run(self):
         self.ui.log_startup(self.mode_name)
@@ -90,36 +93,7 @@ class QuantBot:
         self.ui.log_msg("交易所及WebSocket连接成功", "success")
 
         # 预热: 使用 REST API 拉取历史数据
-        self.ui.log_msg("正在获取历史数据预热模型...", "info")
-        initial_data = self.exchange.fetch_initial_history(limit=100)
-        initial_ohlcv_1m = initial_data['1m']
-        initial_ohlcv_15m = initial_data['15m']
-
-        if initial_ohlcv_1m and initial_ohlcv_15m:
-            # 处理1分钟数据
-            for candle in initial_ohlcv_1m:
-                self.brain.ingest_candle(candle, '1m')
-                # 简单预热训练
-                res = self.brain.analyze()
-                if res:
-                    price_diff = float(candle[4]) - float(candle[1])
-                    label = 0
-                    if price_diff > Config.MIN_TP_DISTANCE * 0.2:
-                        label = 1
-                    elif price_diff < -Config.MIN_TP_DISTANCE * 0.2:
-                        label = -1
-                    self.brain.train_ai(res['features'], label)
-
-            # 处理15分钟数据
-            for candle in initial_ohlcv_15m:
-                self.brain.ingest_candle(candle, '15m')
-
-            # 初始化时间戳
-            self.current_candle_timestamp = initial_ohlcv_1m[-1][0]
-        else:
-            self.ui.log_msg("预热数据获取失败", "error")
-            self.exchange.close()
-            return
+        self._warmup_models()
 
         self.ui.log_msg("系统启动完成，监听数据流...", "success")
 
@@ -137,34 +111,74 @@ class QuantBot:
                 traceback.print_exc()
                 time.sleep(1)
 
+    def _warmup_models(self):
+        """将预热逻辑抽取为单独的方法，使run更清晰"""
+        self.ui.log_msg("正在获取历史数据预热模型...", "info")
+        try:
+            initial_data = self.exchange.fetch_initial_history(limit=100)
+            initial_ohlcv_1m = initial_data.get('1m', [])
+            initial_ohlcv_15m = initial_data.get('15m', [])
+
+            if initial_ohlcv_1m and initial_ohlcv_15m:
+                # 处理1分钟数据
+                for candle in initial_ohlcv_1m:
+                    self.brain.ingest_candle(candle, '1m')
+                    res = self.brain.analyze()
+                    if res:
+                        # [注意] 这里原逻辑是用当前K线内涨跌幅做Label，存在轻微未来函数风险
+                        # 但为了保持原策略一致性，此处未做逻辑修改，仅增加健壮性
+                        price_diff = float(candle[4]) - float(candle[1])
+                        label = 0
+                        if price_diff > Config.MIN_TP_DISTANCE * 0.2:
+                            label = 1
+                        elif price_diff < -Config.MIN_TP_DISTANCE * 0.2:
+                            label = -1
+                        self.brain.train_ai(res['features'], label)
+
+                # 处理15分钟数据
+                for candle in initial_ohlcv_15m:
+                    self.brain.ingest_candle(candle, '15m')
+
+                # 初始化时间戳
+                self.current_candle_timestamp = initial_ohlcv_1m[-1][0]
+            else:
+                self.ui.log_msg("预热数据为空，请检查网络", "error")
+                # 即使预热失败，也可以选择是否继续或退出，这里选择暂时不强制退出，由用户决定
+        except Exception as e:
+            self.ui.log_msg(f"预热过程出错: {e}", "error")
+
     def _tick(self):
         # 1. 从本地缓存获取最新数据
         curr_candle_1m, curr_candle_15m, book, funding_rate, curr_btc_price = self.exchange.get_latest_data()
-        if not curr_candle_15m: return  # 现在主要依赖15分钟K线
+
+        # 如果关键数据缺失，直接跳过本帧，不进行任何计算
+        if not curr_candle_15m:
+            return
 
         # 使用15分钟K线作为主要价格和时间参考
         timestamp = curr_candle_15m[0]
         curr_price = float(curr_candle_15m[4])
+        self.last_tick_price = curr_price  # 更新最后已知价格
 
         # === K线收盘检测与增量学习 ===
-
         if self.last_btc_price == 0:
             self.last_btc_price = curr_btc_price
 
         btc_change_pct = 0.0
-        if self.last_btc_price > 0:
+        if self.last_btc_price > 0 and curr_btc_price > 0:
             btc_change_pct = (curr_btc_price - self.last_btc_price) / self.last_btc_price
 
-        # 更新记录
         self.last_btc_price = curr_btc_price
 
         current_obi = 0.0
         if book:
             current_obi, _ = self.brain.state_machine.ob_analyzer.analyze(book)
 
+        # 初始化时间戳
         if self.current_candle_timestamp == 0:
             self.current_candle_timestamp = timestamp
 
+        # 检测 K 线收盘 (时间戳跳变)
         if timestamp > self.current_candle_timestamp:
             if self.last_tick_analysis is not None:
                 logger.info(f"[Candle Close] K线收盘: {self.current_candle_timestamp} -> {timestamp}")
@@ -172,12 +186,11 @@ class QuantBot:
             self.current_candle_timestamp = timestamp
 
         # 2. 实时送入 Brain - 优先处理15分钟K线
-        if curr_candle_15m:
-            self.brain.ingest_candle(curr_candle_15m, '15m', btc_change_pct=btc_change_pct, obi_value=current_obi)
+        self.brain.ingest_candle(curr_candle_15m, '15m', btc_change_pct=btc_change_pct, obi_value=current_obi)
         if curr_candle_1m:
             self.brain.ingest_candle(curr_candle_1m, '1m', btc_change_pct=btc_change_pct, obi_value=current_obi)
 
-        # 3. 记录交易快照
+        # 3. 记录交易快照 (用于复盘)
         if Config.ENABLE_MAIL_REPORT and self.position['size'] != 0:
             now = time.time()
             if now - self.last_snapshot_time >= 15:
@@ -187,32 +200,39 @@ class QuantBot:
                 })
                 self.last_snapshot_time = now
 
-        # 4. 持仓管理
+        # 4. 持仓管理 (止盈止损)
         if self.position['size'] != 0:
             self._manage_position(curr_price, funding_rate)
 
-        # 5. 开仓逻辑 - 现在每15分钟才检查一次开仓机会
+        # 5. 开仓逻辑 (重要修改：时间窗口检查)
+        # 获取最新的分析结果
         if book:
             analysis = self.brain.analyze(book)
         else:
             analysis = None
 
-        # 只在15分钟K线收盘时检查开仓机会
-        should_check_position = False
-        if curr_candle_15m and self.position['size'] == 0:
-            # 检查是否是新的15分钟K线
-            if self.last_position_check_timestamp != curr_candle_15m[0]:
-                should_check_position = True
-                self.last_position_check_timestamp = curr_candle_15m[0]
-                logger.info(f"[15min Check] 15分钟K线收盘，开始检查开仓机会: {curr_candle_15m[0]}")
+        # 开仓条件检查：
+        # 1. 有分析结果
+        # 2. 当前空仓
+        # 3. 不在CD中
+        # 4. 处于当前K线的"开仓窗口期"内
+        # 5. 该K线尚未进行过交易
 
-        if analysis and should_check_position and not self.risk.is_in_cooldown():
-            self._attempt_entry(analysis, curr_price, funding_rate)
+        # 计算距离K线开盘过去了多少毫秒
+        time_since_candle_open = (time.time() * 1000) - timestamp
+        is_in_entry_window = time_since_candle_open < (self.ENTRY_WINDOW_SECONDS * 1000)
+
+        if (analysis and
+                self.position['size'] == 0 and
+                not self.risk.is_in_cooldown() and
+                is_in_entry_window and
+                self.last_traded_candle_timestamp != timestamp):
+            self._attempt_entry(analysis, curr_price, funding_rate, timestamp)
 
         # 6. UI更新
-        unrealized_pnl = (curr_price - self.position['entry_price']) * self.position['size'] if self.position['size'] != 0 else 0
+        unrealized_pnl = (curr_price - self.position['entry_price']) * self.position['size'] if self.position[
+                                                                                                    'size'] != 0 else 0
 
-        # HF no longer predicts price, so use H-infinity signal instead
         hf_signal = getattr(self.brain.rf_classifier, 'last_hf_signal', 0.0)
         ai_conf = analysis.get('ai_prediction', (0, 0.0))[1] if analysis else 0.0
         cluster_data = analysis.get('cluster', (99, 0.0)) if analysis else (99, 0.0)
@@ -225,7 +245,7 @@ class QuantBot:
             hf_signal, ai_conf, cluster_id
         )
 
-        # Redis 心跳
+        # Redis 心跳 (增加异常捕获)
         if Config.ENABLE_MAIL_REPORT and self.redis_client:
             try:
                 heartbeat_data = {
@@ -236,13 +256,15 @@ class QuantBot:
                     "regime": self.brain.state,
                     "ai_conf": ai_conf,
                     "cluster": cluster_id,
-                    "hf_signal": hf_signal  # Use H-infinity signal instead of price prediction
+                    "hf_signal": hf_signal
                 }
-                self.redis_client.set('bot_status_heartbeat', json.dumps(heartbeat_data))
+                # 设置超时时间，防止堆积
+                self.redis_client.set('bot_status_heartbeat', json.dumps(heartbeat_data), ex=10)
             except Exception:
+                # 心跳失败不应中断主线程，静默失败即可
                 pass
 
-        # 缓存当前帧
+        # 缓存当前帧，用于下一次 Close 时计算 Reward
         if analysis:
             self.last_tick_analysis = analysis
             self.last_tick_price = curr_price
@@ -258,6 +280,7 @@ class QuantBot:
         analysis = self.brain.analyze()
         atr = analysis.get('atr', 0.0) if analysis else 0.0
 
+        # 动态调整止盈 (Trailing TP)
         if self.profit_flip_count >= 1:
             original_tp_distance = max(atr * 2, pos['entry_price'] * Config.MIN_TP_DISTANCE)
             if self.profit_flip_count == 1:
@@ -265,13 +288,14 @@ class QuantBot:
             elif self.profit_flip_count == 2:
                 adjusted_tp_distance = original_tp_distance * 0.75
             else:
-                adjusted_tp_distance = 0.0
+                adjusted_tp_distance = 0.0  # 极度激进，几乎只有手动或反转才平
 
             if pos['size'] > 0:
                 pos['tp'] = pos['entry_price'] + adjusted_tp_distance
             else:
                 pos['tp'] = pos['entry_price'] - adjusted_tp_distance
 
+        # 检查是否满足退出条件
         should_exit, reason = self.risk.check_exit_conditions(
             pos, curr_price, time.time() * 1000, self.profit_flip_count, atr, self.balance
         )
@@ -279,7 +303,8 @@ class QuantBot:
         if should_exit:
             self._execute_exit(reason, curr_price, funding_rate)
 
-    def _attempt_entry(self, data, price, funding_rate):
+    def _attempt_entry(self, data, price, funding_rate, timestamp):
+        """尝试开仓"""
         sig, lev = self.brain.get_entry_signal(data, price)
         regime = self.brain.state
         cluster_data = data.get('cluster', (99, 0.0))
@@ -291,13 +316,18 @@ class QuantBot:
                 self.ui.log_msg(f"跳过交易: {fr_msg}", "warning")
                 return
 
+            # 计算下单量
             amount = self.exchange.get_precision_amount(
                 (self.balance * 0.99) / ((1 / lev) + Config.TAKER_FEE_RATE) / price, price
             )
 
             if amount > 0:
                 side = 'buy' if sig == 1 else 'sell'
+                # 执行下单
                 if self.exchange.execute_order(side, amount):
+                    # [修改] 下单成功后，立即更新"最后交易时间戳"，防止重复下单
+                    self.last_traded_candle_timestamp = timestamp
+
                     atr = data.get('atr', 0.0)
                     sl_dist = price * (1 / lev) * 0.8
                     tp_dist = max(atr * 2, price * Config.MIN_TP_DISTANCE)
@@ -320,6 +350,7 @@ class QuantBot:
         if pos_size == 0: return
 
         side = 'sell' if pos_size > 0 else 'buy'
+        # Reduce Only 确保只平仓不反手
         if self.exchange.execute_order(side, abs(pos_size), params={'reduceOnly': True}):
             entry = self.position['entry_price']
             raw_pnl = (price - entry) * pos_size
@@ -332,6 +363,7 @@ class QuantBot:
 
             self.ui.log_exit(reason, price, net_pnl, fee, self.balance, cd_msg)
 
+            # 发送邮件/记录日志
             if Config.ENABLE_MAIL_REPORT and self.redis_client:
                 try:
                     trade_record = {
@@ -355,6 +387,7 @@ class QuantBot:
                 except Exception as e:
                     logger.error(f"[邮件发送失败] Redis 错误: {e}")
 
+            # 重置状态
             self.trade_snapshots = []
             self.last_snapshot_time = 0
             self.position = {'size': 0.0, 'entry_price': 0.0, 'sl': 0.0, 'tp': 0.0, 'entry_time': 0}
@@ -367,10 +400,16 @@ class QuantBot:
                 self._exit_procedure()
 
     def _exit_procedure(self):
+        logger.info("正在停止服务...")
         self.exchange.close()
+
+        # 只有持仓时才平仓，且使用真实价格
         if self.position['size'] != 0:
-            logger.info("正在平仓并退出...")
-            self._execute_exit("手动退出", 0.0, 0.0)
+            logger.info("正在平仓...")
+            # 使用最后一次tick的价格，如果为0则尝试用entry price (虽然此时PNL为0但至少不会报错)
+            exit_price = self.last_tick_price if self.last_tick_price > 0 else self.position['entry_price']
+            self._execute_exit("手动退出", exit_price, 0.0)
+
         sys.exit(0)
 
 
