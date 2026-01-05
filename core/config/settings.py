@@ -16,7 +16,7 @@ class Config:
     # 交易标的与参数
     SYMBOL = 'XRP/USDT'
     SYMBOL_WS = 'xrpusdt'  # WebSocket用的全小写无斜杠名称
-    TIMEFRAME = '1m'
+    TIMEFRAME = '15m'  # 统一使用15分钟K线进行特征计算和模型预测
 
     # 资金管理
     MIN_LEVERAGE = 5.0

@@ -76,6 +76,8 @@ class QuantBot:
         self.last_tick_analysis = None
         self.last_tick_price = 0.0
         self.last_btc_price = 0.0
+        # 15分钟开仓检查时间戳 - 每15分钟才检查一次开仓机会
+        self.last_position_check_timestamp = 0
 
     def run(self):
         self.ui.log_startup(self.mode_name)
@@ -138,10 +140,11 @@ class QuantBot:
     def _tick(self):
         # 1. 从本地缓存获取最新数据
         curr_candle_1m, curr_candle_15m, book, funding_rate, curr_btc_price = self.exchange.get_latest_data()
-        if not curr_candle_1m: return
+        if not curr_candle_15m: return  # 现在主要依赖15分钟K线
 
-        timestamp = curr_candle_1m[0]
-        curr_price = float(curr_candle_1m[4])
+        # 使用15分钟K线作为主要价格和时间参考
+        timestamp = curr_candle_15m[0]
+        curr_price = float(curr_candle_15m[4])
 
         # === K线收盘检测与增量学习 ===
 
@@ -168,10 +171,11 @@ class QuantBot:
                 self.brain.on_candle_close(self.last_tick_analysis, self.last_tick_price)
             self.current_candle_timestamp = timestamp
 
-        # 2. 实时送入 Brain
-        self.brain.ingest_candle(curr_candle_1m, '1m', btc_change_pct=btc_change_pct,obi_value=current_obi)
+        # 2. 实时送入 Brain - 优先处理15分钟K线
         if curr_candle_15m:
-            self.brain.ingest_candle(curr_candle_15m, '15m')
+            self.brain.ingest_candle(curr_candle_15m, '15m', btc_change_pct=btc_change_pct, obi_value=current_obi)
+        if curr_candle_1m:
+            self.brain.ingest_candle(curr_candle_1m, '1m', btc_change_pct=btc_change_pct, obi_value=current_obi)
 
         # 3. 记录交易快照
         if Config.ENABLE_MAIL_REPORT and self.position['size'] != 0:
@@ -187,15 +191,23 @@ class QuantBot:
         if self.position['size'] != 0:
             self._manage_position(curr_price, funding_rate)
 
-        # 5. 开仓逻辑
+        # 5. 开仓逻辑 - 现在每15分钟才检查一次开仓机会
         if book:
             analysis = self.brain.analyze(book)
         else:
             analysis = None
 
-        if analysis and not self.risk.is_in_cooldown():
-            if self.position['size'] == 0:
-                self._attempt_entry(analysis, curr_price, funding_rate)
+        # 只在15分钟K线收盘时检查开仓机会
+        should_check_position = False
+        if curr_candle_15m and self.position['size'] == 0:
+            # 检查是否是新的15分钟K线
+            if self.last_position_check_timestamp != curr_candle_15m[0]:
+                should_check_position = True
+                self.last_position_check_timestamp = curr_candle_15m[0]
+                logger.info(f"[15min Check] 15分钟K线收盘，开始检查开仓机会: {curr_candle_15m[0]}")
+
+        if analysis and should_check_position and not self.risk.is_in_cooldown():
+            self._attempt_entry(analysis, curr_price, funding_rate)
 
         # 6. UI更新
         unrealized_pnl = (curr_price - self.position['entry_price']) * self.position['size'] if self.position['size'] != 0 else 0

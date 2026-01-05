@@ -71,7 +71,8 @@ class RandomForestClassifier:
         self.cached_analysis_data = None
 
     def ingest_candle(self, candle, timeframe='1m', btc_change_pct=0.0, obi_value=0.0):
-        if timeframe == '1m':
+        if timeframe == '15m':
+            # 15分钟K线用于主要特征计算和模型预测
             if len(candle) == 6:
                 candle.append(candle[5] * 0.5)
             timestamp, open_, high, low, close, vol, taker_buy_vol = candle
@@ -83,17 +84,20 @@ class RandomForestClassifier:
             else:
                 self.history = pd.concat([self.history, new_row]).iloc[-500:]
 
+            # 只在15分钟K线收盘时重新计算特征
+            self._recalculate_and_cache_features(close, btc_change_pct, obi_value)
+            
+        elif timeframe == '1m':
+            # 1分钟K线仅用于高频价格预测，不用于主要特征计算
             if len(self.history) > 1:
                 X_hf = {'close_lag1': self.history['close'].iloc[-2]}
-                y_true = close
+                y_true = candle[4]  # 使用1分钟收盘价
                 pred_price = self.hf_predictor_1m.predict_one(X_hf)
 
                 self.last_hf_prediction = pred_price
-                self.price_prediction_diff = (pred_price - close) / close
+                self.price_prediction_diff = (pred_price - candle[4]) / candle[4]
 
                 self.hf_predictor_1m.learn_one(X_hf, y_true)
-
-            self._recalculate_and_cache_features(close, btc_change_pct, obi_value)
 
     def _recalculate_and_cache_features(self, curr_price, btc_change_pct=0.0, obi_value=0.0):
         if len(self.history) < 30:

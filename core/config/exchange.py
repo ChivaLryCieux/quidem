@@ -96,8 +96,8 @@ class MarketDataStreamer(threading.Thread):
                     if 'r' in payload:
                         self.data['funding_rate'] = float(payload['r'])
 
-                # 检查数据是否准备就绪
-                if self.data['kline_1m'] and self.data['orderbook']:
+                # 检查数据是否准备就绪 - 现在主要依赖15分钟K线
+                if self.data['kline_15m'] and self.data['orderbook']:
                     self.data['is_ready'] = True
 
         except Exception as e:

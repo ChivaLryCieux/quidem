@@ -427,9 +427,14 @@ class StrategyBacktesterUnified:
                 if res15 and 'features' in res15 and res15['features'] is not None:
                     self.brain.train_ai(res15['features'], label)
                 
+                # 15分钟K线收盘时检查开仓机会
+                if self.position['size'] == 0 and res15 and not self.risk.is_in_cooldown(now_ms=int(c15[0])):
+                    price_15m = float(c15[4])
+                    self._attempt_entry(res15, price_15m, int(c15[0]))
+                
                 idx_15 += 1
 
-            # 1m：执行交易逻辑（入场/持仓管理/出场）
+            # 1m：执行交易逻辑（持仓管理/出场） - 开仓只在15分钟K线收盘时检查
             self.brain.ingest_candle(c1, '1m')
             analysis = self.brain.analyze()
             
@@ -443,8 +448,7 @@ class StrategyBacktesterUnified:
             price = float(c1[4])
             if self.position['size'] != 0:
                 self._manage_position(price, analysis, current_time_ms)
-            elif not self.risk.is_in_cooldown(now_ms=current_time_ms):
-                self._attempt_entry(analysis, price, current_time_ms)
+            # 开仓逻辑移到15分钟K线处理部分
         
         # 回测结束：若仍持仓则按最后一根K线收盘价平仓
         if self.position['size'] != 0 and len(data_1m) > 0:
