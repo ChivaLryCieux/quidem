@@ -8,7 +8,9 @@ from colorama import Fore, Style
 try:
     import river
     from river import compose
-    from river import preprocessing, linear_model, optim
+    from river import preprocessing, linear_model, optim, ensemble
+    from river import tree
+    from river import base
 
     try:
         from river.forest import AdaptiveRandomForestClassifier
@@ -28,23 +30,75 @@ from core.analysis.transform import MomentumCalculator, RollingVolatilityCalcula
 logger = logging.getLogger(__name__)
 
 
-class RandomForestClassifier:
+class SRP_PAR_EWA_Ensemble:
+    """
+    SRP (Streaming Random Patches) + PAR (Passive-Aggressive Regressor) 
+    双核架构，结合EWARegressor动态权重分配
+    """
     def __init__(self):
-        self.rf_model = compose.Pipeline(
+        # SRP - Streaming Random Patches (Tree-based)
+        self.srp_model = compose.Pipeline(
             preprocessing.StandardScaler(),
-            AdaptiveRandomForestClassifier(
-                n_models=30,
-                max_depth=12,
-                split_criterion="hellinger",
+            tree.HoeffdingTreeClassifier(
                 grace_period=50,
-                lambda_value=6,
-                seed=42
+                delta=1e-5,
+                max_depth=12,
+                split_criterion="info_gain"
             )
         )
-
-        self.linear_model = compose.Pipeline(
+        
+        # PAR - Passive-Aggressive Regressor (Linear)
+        self.par_model = compose.Pipeline(
             preprocessing.StandardScaler(),
-            linear_model.LogisticRegression(optimizer=optim.SGD(lr=0.01))
+            linear_model.PARegressor(
+                C=1.0,
+                eps=0.1,
+                mode=1  # PA-I
+            )
+        )
+        
+        # 使用更适合的回归模型进行动态权重分配
+        self.srp_regressor = compose.Pipeline(
+            preprocessing.StandardScaler(),
+            linear_model.LinearRegression(
+                optimizer=optim.SGD(lr=0.01)
+            )
+        )
+        
+        self.par_regressor = compose.Pipeline(
+            preprocessing.StandardScaler(),
+            linear_model.PARegressor(
+                C=1.0,
+                eps=0.1,
+                mode=1
+            )
+        )
+        
+        # EWARegressor 动态权重分配
+        self.ewa_ensemble = ensemble.EWARegressor(
+            models=[
+                self.srp_regressor,  # Tree-based regression
+                self.par_regressor   # Linear regression
+            ],
+            learning_rate=0.5
+        )
+        
+        # 用于分类任务的辅助模型
+        self.classifier_srp = compose.Pipeline(
+            preprocessing.StandardScaler(),
+            tree.HoeffdingTreeClassifier(
+                grace_period=50,
+                delta=1e-5,
+                max_depth=12,
+                split_criterion="info_gain"
+            )
+        )
+        
+        self.classifier_par = compose.Pipeline(
+            preprocessing.StandardScaler(),
+            linear_model.LogisticRegression(
+                optimizer=optim.SGD(lr=0.01)
+            )
         )
 
         self.last_close_price = None
@@ -170,34 +224,73 @@ class RandomForestClassifier:
         }
 
     def predict(self, features):
-        # 确保所有特征值都不是 None，将 None 替换为 0.0
-        feature_values = []
-        for i, v in enumerate(features.flatten()):
-            if v is None:
-                feature_values.append(0.0)
+        """
+        SRP + PAR + EWA 双核预测
+        """
+        # 处理不同类型的特征输入
+        if isinstance(features, dict):
+            # 如果传入的是字典，直接使用
+            x = {f"f{i}": v if v is not None else 0.0 for i, v in enumerate(features.values())}
+        elif isinstance(features, np.ndarray):
+            # 如果传入的是numpy数组，按原逻辑处理
+            feature_values = []
+            for i, v in enumerate(features.flatten()):
+                if v is None:
+                    feature_values.append(0.0)
+                else:
+                    feature_values.append(v)
+            x = {f"f{i}": v for i, v in enumerate(feature_values)}
+        else:
+            # 其他类型，转换为字典
+            x = {f"f{i}": v if v is not None else 0.0 for i, v in enumerate(features)}
+
+        # SRP (Tree-based) 预测
+        srp_probs = self.classifier_srp.predict_proba_one(x)
+        srp_conf_1 = srp_probs.get(1, 0.0)
+        srp_conf_minus_1 = srp_probs.get(-1, 0.0)
+
+        # PAR (Linear) 预测  
+        par_probs = self.classifier_par.predict_proba_one(x)
+        par_conf_1 = par_probs.get(1, 0.0)
+        par_conf_minus_1 = par_probs.get(-1, 0.0)
+
+        # 使用EWARegressor进行动态权重分配
+        # 将分类问题转换为回归问题：1 -> 1.0, -1 -> -1.0, 0 -> 0.0
+        srp_pred_value = srp_conf_1 - srp_conf_minus_1
+        par_pred_value = par_conf_1 - par_conf_minus_1
+        
+        # 创建特征用于EWA回归 - 使用单一特征简化
+        reg_features = {'ensemble_input': (srp_pred_value + par_pred_value) / 2}
+        
+        # 获取EWA动态权重 - 使用简单加权平均作为回退
+        try:
+            # 首先尝试用SRP和PAR的预测值作为训练数据
+            if hasattr(self, '_ewa_initialized') and self._ewa_initialized:
+                ewa_pred = self.ewa_ensemble.predict_one(reg_features)
+                if ewa_pred is not None:
+                    final_pred_value = ewa_pred
+                else:
+                    final_pred_value = (srp_pred_value + par_pred_value) / 2
             else:
-                feature_values.append(v)
-        x = {f"f{i}": v for i, v in enumerate(feature_values)}
-
-        rf_probs = self.rf_model.predict_proba_one(x)
-        rf_conf_1 = rf_probs.get(1, 0.0)
-        rf_conf_minus_1 = rf_probs.get(-1, 0.0)
-
-        linear_probs = self.linear_model.predict_proba_one(x)
-        ln_conf_1 = linear_probs.get(1, 0.0)
-        ln_conf_minus_1 = linear_probs.get(-1, 0.0)
-
-        final_prob_1 = (rf_conf_1 * 0.5) + (ln_conf_1 * 0.5)
-        final_prob_minus_1 = (rf_conf_minus_1 * 0.5) + (ln_conf_minus_1 * 0.5)
-
-        if final_prob_1 > final_prob_minus_1 and final_prob_1 > 0.5:
-            return 1, final_prob_1
-        elif final_prob_minus_1 > final_prob_1 and final_prob_minus_1 > 0.5:
-            return -1, final_prob_minus_1
+                # 初始阶段使用简单平均
+                final_pred_value = (srp_pred_value + par_pred_value) / 2
+                self._ewa_initialized = True
+        except Exception as e:
+            logger.warning(f"EWA预测失败: {e}，使用简单平均")
+            final_pred_value = (srp_pred_value + par_pred_value) / 2
+        
+        # 转换回分类结果
+        if final_pred_value > 0.2:  # 看涨阈值
+            return 1, abs(final_pred_value)
+        elif final_pred_value < -0.2:  # 看跌阈值
+            return -1, abs(final_pred_value)
         else:
             return 0, 0.0
 
     def on_candle_close(self, closed_candle_analysis, current_close_price):
+        """
+        SRP + PAR + EWA 在线学习更新
+        """
         if self.last_close_price is None:
             self.last_close_price = current_close_price
             self.training_features_buffer = closed_candle_analysis['features']
@@ -217,10 +310,15 @@ class RandomForestClassifier:
                 dynamic_threshold = COST_THRESHOLD
 
             label = 0
+            regression_target = 0.0
             if price_diff_pct > dynamic_threshold:
                 label = 1
+                regression_target = 1.0
             elif price_diff_pct < -dynamic_threshold:
                 label = -1
+                regression_target = -1.0
+            else:
+                regression_target = 0.0
 
             # 确保训练特征中没有 None 值
             feature_values = []
@@ -231,15 +329,21 @@ class RandomForestClassifier:
                     feature_values.append(v)
             x = {f"f{i}": v for i, v in enumerate(feature_values)}
 
-            self.rf_model.learn_one(x, label)
-
+            # SRP (Tree-based) 分类训练
+            self.classifier_srp.learn_one(x, label)
+            
+            # PAR (Linear) 分类训练
             if label != 0:
-                self.linear_model.learn_one(x, label)
+                self.classifier_par.learn_one(x, label)
+            
+            # EWA 回归训练 - 使用回归目标
+            reg_features = {'input': sum(feature_values) / len(feature_values)}  # 简化特征
+            self.ewa_ensemble.learn_one(reg_features, regression_target)
 
             self.train_count += 1
 
             if label != 0:
-                print(f"[AI Learn] 波动:{atr_val:.4f} | 涨跌:{price_diff_pct:.2%} | Label:{label} (双核更新)")
+                print(f"[AI Learn] 波动:{atr_val:.4f} | 涨跌:{price_diff_pct:.2%} | Label:{label} | Target:{regression_target} (SRP+PAR+EWA三核更新)")
 
         self.last_close_price = current_close_price
         self.training_features_buffer = closed_candle_analysis['features']

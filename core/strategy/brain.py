@@ -3,7 +3,7 @@ import pandas as pd
 import logging
 from colorama import Fore, Style
 
-from core.models.ml_models import RandomForestClassifier
+from core.models.ml_models import SRP_PAR_EWA_Ensemble
 from core.models.cluster import KMeansClusterAnalyzer
 from core.strategy.analyzers import OrderBookAnalyzer, StateMachine
 from core.strategy.signals import SignalGenerator
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # ==========================================
 class StrategyBrain:
     def __init__(self):
-        self.rf_classifier = RandomForestClassifier()
+        self.rf_classifier = SRP_PAR_EWA_Ensemble()
         self.state_machine = StateMachine()
         self.cluster_analyzer = KMeansClusterAnalyzer()
         self.signal_generator = SignalGenerator()
@@ -62,8 +62,10 @@ class StrategyBrain:
             else:
                 feature_values.append(v)
         x = {f"f{i}": v for i, v in enumerate(feature_values)}
-        self.rf_classifier.rf_model.learn_one(x, label)
-        self.rf_classifier.linear_model.learn_one(x, label)
+        
+        # SRP + PAR + EWA 训练
+        self.rf_classifier.classifier_srp.learn_one(x, label)
+        self.rf_classifier.classifier_par.learn_one(x, label)
 
     def get_entry_signal(self, analysis_data, current_price):
         return self.state_machine.get_entry_signal(analysis_data, current_price)
