@@ -16,7 +16,7 @@ class SignalGenerator:
             
         # 基础信号生成逻辑
         ai_dir, ai_conf = analysis_data.get('ai_prediction', (0, 0.0))
-        cluster_id = analysis_data.get('cluster', (5, 0.0))[0]
+        cluster_id = analysis_data.get('cluster', (99, 0.0))[0]
         
         # 这里可以添加更复杂的信号生成逻辑
         # 比如多时间框架分析、技术指标组合等

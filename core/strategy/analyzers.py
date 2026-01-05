@@ -36,7 +36,7 @@ class StateMachine:
     def __init__(self):
         self.state, self.color = "INIT", Fore.WHITE
         self.ob_analyzer = OrderBookAnalyzer()
-        self.last_cluster = 5
+        self.last_cluster = 99  # 入口簇改为99
 
     def determine_regime(self, range_pct, vol_expl):
         if range_pct < 0.0015:
@@ -62,7 +62,7 @@ class StateMachine:
         features = analysis_data['features']
         # 这里 ai_conf 已经是 双核平均值
         ai_dir, ai_conf = analysis_data['ai_prediction']
-        cluster_data = analysis_data.get('cluster', (5, 0.0))
+        cluster_data = analysis_data.get('cluster', (99, 0.0))
         cluster_id = cluster_data[0]
 
         sig, lev = 0, Config.MIN_LEVERAGE
@@ -72,7 +72,7 @@ class StateMachine:
             print(f"⛔ Spread过大: {spread_pct:.5f}")
             return 0, lev
 
-        if cluster_id == 5:
+        if cluster_id == 99:  # 入口簇改为99
             return 0, lev
 
         if cluster_id != self.last_cluster:
@@ -84,32 +84,52 @@ class StateMachine:
         is_signal = False
         match_reason = ""
 
-        # === [回滚操作] 恢复为标准策略，不使用激进的 OBI 判定 ===
+        # === 新状态机规则 ===
         if cluster_id == 0:
+            # 簇0波动，多空看AI
             if ai_dir != 0 and ai_conf > target_conf:
                 sig, lev, is_signal = ai_dir, 5, True
                 match_reason = f"簇0波动+AI信心{ai_conf:.2f}"
 
         elif cluster_id == 1:
-            # 取消了 "if ai_dir == 0 and obi > 0.2" 的逻辑
-            if ai_dir == 1 and ai_conf > target_conf:
-                sig, lev, is_signal = 1, 5, True
-                match_reason = f"簇1涨+AI看涨{ai_conf:.2f}"
+            # 簇1波动，多空看AI
+            if ai_dir != 0 and ai_conf > target_conf:
+                sig, lev, is_signal = ai_dir, 5, True
+                match_reason = f"簇1波动+AI信心{ai_conf:.2f}"
 
         elif cluster_id == 2:
+            # 簇2大跌，只做空
             if ai_dir == -1 and ai_conf > target_conf:
                 sig, lev, is_signal = -1, 5, True
-                match_reason = f"簇2跌+AI看跌{ai_conf:.2f}"
+                match_reason = f"簇2大跌+AI看跌{ai_conf:.2f}"
 
         elif cluster_id == 3:
-            if ai_dir == 1 and ai_conf > target_conf:
-                sig, lev, is_signal = 1, 5, True
-                match_reason = f"簇3大涨+AI看涨{ai_conf:.2f}"
+            # 簇3危险，不开仓
+            sig, lev, is_signal = 0, Config.MIN_LEVERAGE, False
+            match_reason = f"簇3危险+不开仓"
 
         elif cluster_id == 4:
+            # 簇4涨，只做多
+            if ai_dir == 1 and ai_conf > target_conf:
+                sig, lev, is_signal = 1, 5, True
+                match_reason = f"簇4涨+AI看涨{ai_conf:.2f}"
+
+        elif cluster_id == 5:
+            # 簇5大涨，只做多
+            if ai_dir == 1 and ai_conf > target_conf:
+                sig, lev, is_signal = 1, 5, True
+                match_reason = f"簇5大涨+AI看涨{ai_conf:.2f}"
+
+        elif cluster_id == 6:
+            # 簇6跌，只做空，无论多空都要配合AI方向和信心
             if ai_dir == -1 and ai_conf > target_conf:
                 sig, lev, is_signal = -1, 5, True
-                match_reason = f"簇4大跌+AI看跌{ai_conf:.2f}"
+                match_reason = f"簇6跌+AI看跌{ai_conf:.2f}"
+
+        else:
+            # 其他未知簇，默认不开仓
+            sig, lev, is_signal = 0, Config.MIN_LEVERAGE, False
+            match_reason = f"未知簇{cluster_id}+不开仓"
 
         if is_signal:
             logger.info(f"信号生成: {match_reason}")

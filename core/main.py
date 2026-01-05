@@ -215,7 +215,7 @@ class QuantBot:
         hf_pred_1m = getattr(self.brain.rf_classifier, 'last_hf_prediction', 0.0)
         hf_pred_diff = self.brain.rf_classifier.price_prediction_diff if analysis else 0.0
         ai_conf = analysis.get('ai_prediction', (0, 0.0))[1] if analysis else 0.0
-        cluster_data = analysis.get('cluster', (5, 0.0)) if analysis else (5, 0.0)
+        cluster_data = analysis.get('cluster', (99, 0.0)) if analysis else (99, 0.0)
         cluster_id = cluster_data[0]
         obi = analysis.get('obi', 0.0) if analysis else 0.0
 
@@ -282,7 +282,7 @@ class QuantBot:
     def _attempt_entry(self, data, price, funding_rate):
         sig, lev = self.brain.get_entry_signal(data, price)
         regime = self.brain.state
-        cluster_data = data.get('cluster', (5, 0.0))
+        cluster_data = data.get('cluster', (99, 0.0))
         current_cluster_id = cluster_data[0]
 
         if sig != 0:
@@ -348,7 +348,7 @@ class QuantBot:
                         "balance": self.balance,
                         "regime": self.brain.state,
                         "reason": reason,
-                        "cluster": self.position.get('cluster', 5),
+                        "cluster": self.position.get('cluster', 99),
                         "snapshots": self.trade_snapshots
                     }
                     self.redis_client.rpush('trade_journal_pending', json.dumps(trade_record))

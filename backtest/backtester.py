@@ -234,7 +234,7 @@ class StrategyBacktesterUnified:
         atr_15m = getattr(self.brain.rf_classifier, "atr_15m_last", 0.0)
         atr_1m = analysis.get('atr', 0.0) if analysis else 0.0
         curr_rsi = analysis.get('rsi', 50.0)
-        cluster_info = analysis.get('cluster', (5, 0))
+        cluster_info = analysis.get('cluster', (99, 0))
 
         tp_dist = max(atr_15m * 2, eprice * Config.MIN_TP_DISTANCE)
         sl_atr = atr_15m if atr_15m > 0 else atr_1m
@@ -346,7 +346,7 @@ class StrategyBacktesterUnified:
             'entry_atr': self.position.get('entry_atr', 0.0),
             'exit_atr': exit_atr,
             'flips': self.profit_flip_count,
-            'cluster': self.position.get('cluster', 5)
+            'cluster': self.position.get('cluster', 99)
         })
         
         self.snapshots = []
