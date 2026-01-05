@@ -3,35 +3,22 @@ from scipy.stats import t as student_t
 
 
 class MomentumCalculator:
-    def __init__(self, periods=[5, 10, 25, 50]):
+    def __init__(self, periods=[1, 5, 15, 30, 50, 96]):
         self.periods = periods
-        self.price_history = []
+        self.history = []
+        self.max_len = max(periods) + 5
 
     def update(self, price):
-        self.price_history.append(price)
-        max_period = max(self.periods)
-        if len(self.price_history) > max_period:
-            self.price_history.pop(0)
-
-        momentum_values = {}
-        current_price = price
-
-        for T in self.periods:
-            if len(self.price_history) >= T + 1:
-                price_T_periods_ago = self.price_history[-(T + 1)]
-                momentum = current_price / price_T_periods_ago
-                # 取对数输出
-                momentum_values[f"T_{T}"] = np.log(momentum)
-            else:
-                momentum_values[f"T_{T}"] = None
-
-        return momentum_values
+        self.history.append(price)
+        if len(self.history) > self.max_len:
+            self.history.pop(0)
+        return np.array(
+            [np.log(self.history[-1] / self.history[-(p + 1)]) if len(self.history) > p else 0.0 for p in self.periods])
 
     def get_momentum(self, prices, T):
         if len(prices) <= T:
             return None
         momentum = prices[-1] / prices[-(T + 1)]
-        # 取对数输出
         return np.log(momentum)
 
     def calculate_all_momentums(self, prices):
@@ -145,5 +132,7 @@ class OnlineBOCPD:
         new_mu = np.append(0.0, (self.kappa * self.mu + x) / (self.kappa + 1))
         new_beta = np.append(1e-4, self.beta + (self.kappa * (x - self.mu) ** 2) / (2 * (self.kappa + 1)))
         limit = len(self.R)
-        self.alpha, self.kappa, self.mu, self.beta = new_alpha[:limit], new_kappa[:limit], new_mu[:limit], new_beta[
-                                                                                                           :limit]
+        self.alpha, self.kappa, self.mu, self.beta = new_alpha[:limit], new_kappa[:limit], new_mu[:limit], new_beta[:limit]
+        
+        # Return change point probability
+        return float(cp_prob)

@@ -24,7 +24,7 @@ except ImportError as e:
     sys.exit(1)
 
 from core.analysis.indicators import MathUtils
-from core.analysis.filters import HInfinityFilter1D, OnlineEGARCH, WaveletAnalyzer
+from core.analysis.filters import MultivariateHInfinityFilter, OnlineEGARCH, WaveletAnalyzer
 from core.analysis.transform import MomentumCalculator, RollingVolatilityCalculator, FractalAnalysis, OnlineBOCPD
 
 logger = logging.getLogger(__name__)
@@ -107,21 +107,34 @@ class SRP_PAR_EWA_Ensemble:
 
         self.train_count = 0
 
-        self.price_prediction_diff = 0.0
-        self.last_hf_prediction = 0.0
+        # Remove price prediction related variables
+        # self.price_prediction_diff = 0.0
+        # self.last_hf_prediction = 0.0
+        
+        # Add H-infinity signal tracking
+        self.last_hf_signal = 0.0
 
-        self.hf_predictor_1m = compose.Pipeline(
-            preprocessing.StandardScaler(),
-            linear_model.LinearRegression()
-        )
+        # Remove hf_predictor_1m as we no longer predict prices
+        # self.hf_predictor_1m = compose.Pipeline(
+        #     preprocessing.StandardScaler(),
+        #     linear_model.LinearRegression()
+        # )
 
+        # New optimized H-infinity system components
         self.wavelet = WaveletAnalyzer()
-        self.hf = HInfinityFilter1D()
         self.egarch = OnlineEGARCH()
-        self.momentum_calc = MomentumCalculator()
+        self.momentum_calc = MomentumCalculator(periods=[1, 5, 15, 30, 50, 96])
         self.volatility_calc = RollingVolatilityCalculator()
         self.fractal_analysis = FractalAnalysis()
         self.bocpd = OnlineBOCPD()
+        
+        # Multivariate H-infinity filter (7 features: 6 momentum + 1 bias)
+        self.n_hf_features = 7
+        self.hf_filter = MultivariateHInfinityFilter(n_features=self.n_hf_features)
+        self.prev_hf_features = None
+        self.prev_price = None
+        
+        # Initialize cached analysis data
         self.cached_analysis_data = None
 
     def ingest_candle(self, candle, timeframe='1m', btc_change_pct=0.0, obi_value=0.0):
@@ -142,83 +155,107 @@ class SRP_PAR_EWA_Ensemble:
             self._recalculate_and_cache_features(close, btc_change_pct, obi_value)
             
         elif timeframe == '1m':
-            # 1分钟K线仅用于高频价格预测，不用于主要特征计算
-            if len(self.history) > 1:
-                X_hf = {'close_lag1': self.history['close'].iloc[-2]}
-                y_true = candle[4]  # 使用1分钟收盘价
-                pred_price = self.hf_predictor_1m.predict_one(X_hf)
-
-                self.last_hf_prediction = pred_price
-                self.price_prediction_diff = (pred_price - candle[4]) / candle[4]
-
-                self.hf_predictor_1m.learn_one(X_hf, y_true)
+            # 1分钟K线不再用于价格预测，仅记录历史数据
+            pass
 
     def _recalculate_and_cache_features(self, curr_price, btc_change_pct=0.0, obi_value=0.0):
         if len(self.history) < 30:
             self.cached_analysis_data = None
             return
 
+        # Process price through wavelet for noise reduction
+        # Use recent price history for wavelet analysis
+        if len(self.history) >= 16:
+            price_history = self.history['close'].iloc[-16:].tolist()
+            clean_price = self.wavelet.process(price_history)[0]
+        else:
+            clean_price = curr_price
+        
+        # Calculate log return
         last_p = self.last_close_price if self.last_close_price else curr_price
         log_ret = np.log(curr_price / last_p) if last_p > 0 else 0.0
-
+        
+        # Update EGARCH volatility
         eg_vol = self.egarch.update(log_ret)
-        hf_val = self.hf.update(curr_price)
-        wav_res, wav_eng = self.wavelet.process(self.history['close'].values)
+        
+        # Calculate momentums (this now returns numpy array)
+        prices_list = self.history['close'].tolist()
+        moms = self.momentum_calc.update(clean_price)
+        
+        # Update fractal analysis and change point detection
+        hurst = self.fractal_analysis.update(curr_price)
+        cp_prob = self.bocpd.update(log_ret)
+        
+        # Calculate other features
         rsi = MathUtils.calc_rsi(self.history['close']).iloc[-1]
         atr = MathUtils.calc_atr(self.history).iloc[-1]
-
-        prices_list = self.history['close'].tolist()
-        momentums = self.momentum_calc.calculate_all_momentums(prices_list)
-        volatilities = self.volatility_calc.calculate_all_volatilities(prices_list)
-
-        hurst = self.fractal_analysis.update(curr_price)
-        cp_prob = self.bocpd.update(curr_price)
         range_pct = (self.history['high'].iloc[-1] - self.history['low'].iloc[-1]) / self.history['open'].iloc[-1]
-        hf_diff = (curr_price - hf_val) / hf_val
         prev_atr = MathUtils.calc_atr(self.history.iloc[:-1]).iloc[-1]
         vol_expl = (self.history['high'].iloc[-1] - self.history['low'].iloc[-1]) / (prev_atr + 1e-9)
-
+        
         curr_vol = self.history['volume'].iloc[-1]
         curr_taker_buy = self.history['taker_buy'].iloc[-1]
-
         buy_ratio = curr_taker_buy / (curr_vol + 1e-9)
         buy_pressure = (buy_ratio - 0.5) * 2.0
-
         vol_ma5 = self.history['volume'].rolling(5).mean().iloc[-1]
         vol_ratio = curr_vol / (vol_ma5 + 1e-9)
-
+        
         btc_mom = btc_change_pct * 1000
-
         xrp_change = (curr_price - self.last_close_price) / self.last_close_price if self.last_close_price else 0.0
         alpha = (xrp_change - btc_change_pct) * 1000
-
+        
+        # Create H-infinity features: 6 momentum features + 1 bias
+        current_hf_features = np.concatenate([moms, [1.0]])
+        
+        # Update H-infinity filter if we have previous features
+        if self.prev_hf_features is not None and self.prev_price is not None:
+            prev_log_ret = np.log(curr_price / self.prev_price) if self.prev_price > 0 else 0.0
+            self.hf_filter.update(self.prev_hf_features, prev_log_ret, cp_prob)
+        
+        # Generate H-infinity signal (momentum reversion strategy)
+        hf_signal = -1.0 * self.hf_filter.predict(current_hf_features)
+        
+        # Store H-infinity signal for UI display
+        self.last_hf_signal = hf_signal
+        
+        # Store current state for next iteration
+        self.prev_price = curr_price
+        self.prev_hf_features = current_hf_features
+        
         def get_val(d, k): return d.get(k, 0.0) if d.get(k) is not None else 0.0
-
+        volatilities = self.volatility_calc.calculate_all_volatilities(prices_list)
+        
+        # Build feature array - replace hf_diff with hf_signal
+        # Note: moms is array with indices [0,1,2,3,4,5] corresponding to periods [1,5,15,30,50,96]
         features = np.array([
-            hf_diff,
+            hf_signal,  # Replaced hf_diff with hf_signal
             eg_vol * 1000,
             rsi / 100.0,
             vol_expl,
             range_pct,
-            (curr_price - wav_res) / curr_price * 100,
-            np.log1p(wav_eng),
-            get_val(momentums, 'T_5'), get_val(momentums, 'T_10'),
-            get_val(momentums, 'T_25'), get_val(momentums, 'T_50'),
+            (curr_price - clean_price) / curr_price * 100,  # Use clean_price instead of wav_res
+            0.0,  # Placeholder for wavelet energy (not available in new implementation)
+            moms[1] if len(moms) > 1 else 0.0,  # T_5 (index 1)
+            moms[1] if len(moms) > 1 else 0.0,  # T_10 - using T_5 as approximation
+            moms[2] if len(moms) > 2 else 0.0,  # T_15 - using as T_25 approximation
+            moms[3] if len(moms) > 3 else 0.0,  # T_30 - using as T_50 approximation
             get_val(volatilities, 'T_5'), get_val(volatilities, 'T_10'),
             get_val(volatilities, 'T_25'), get_val(volatilities, 'T_50'),
-            self.price_prediction_diff, hurst, cp_prob,
-
+            0.0, hurst, cp_prob,  # Replaced self.price_prediction_diff with 0.0
+            
             buy_pressure,
             np.log1p(vol_ratio),
             btc_mom,
             alpha,
             obi_value
         ]).reshape(1, -1)
-
+        
         self.cached_analysis_data = {
             'features': features, 'price': curr_price, 'atr': atr, 'rsi': rsi,
-            'vol_explosion': vol_expl, 'hf_diff': hf_diff, 'wavelet_energy': wav_eng,
-            'momentum_values': momentums, 'volatility_values': volatilities,
+            'vol_explosion': vol_expl, 'hf_signal': hf_signal, 'wavelet_energy': 0.0,
+            'momentum_values': {'T_1': moms[0], 'T_5': moms[1], 'T_15': moms[2], 
+                              'T_30': moms[3], 'T_50': moms[4], 'T_96': moms[5]}, 
+            'volatility_values': volatilities,
             'range_pct': range_pct, 'obi': 0.0,
             'hurst_exponent': hurst, 'change_point_prob': cp_prob
         }

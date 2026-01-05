@@ -4,37 +4,84 @@ from scipy.stats import t as student_t
 import pywt
 
 
-class HInfinityFilter1D:
-    def __init__(self, gamma=0.13, process_noise=0.01, measurement_noise=0.002, estimated_error=0.02):
-        self.Q, self.R, self.P, self.x = process_noise, measurement_noise, estimated_error, 0
+class MultivariateHInfinityFilter:
+    def __init__(self, n_features, gamma=0.49, q_base=0.00001, r_base=1e-3, p_init=0.1):
+        self.n = n_features
+        self.I = np.eye(self.n)
+        self.q_base = q_base
+        self.x = np.zeros((self.n, 1))
+        self.P = np.eye(self.n) * p_init
+        self.R = np.array([[r_base]])
+        self.Q = np.eye(self.n) * q_base
         self.gamma_sq = gamma ** 2
 
-    def update(self, z):
-        if self.x == 0: self.x = z
-        x_pred, P_pred = self.x, self.P + self.Q
-        term = (1 / (self.R + 1e-9)) - (1 / (self.gamma_sq + 1e-9))
-        denom = 1 + P_pred * term
-        if denom <= 1e-6:
-            self.P = P_pred;
-            K = 0.0
-        else:
-            K = P_pred * (1 / (self.R + 1e-9)) / denom;
-            self.P = P_pred / denom
-        self.x = x_pred + K * (z - x_pred)
-        return self.x
+    def predict(self, features):
+        H = np.array(features).reshape(1, -1)
+        pred = H @ self.x
+        return pred[0, 0]
+
+    def update(self, prev_features, actual_return, cp_prob=0.0):
+        y = np.array([[actual_return]])
+        H = np.array(prev_features).reshape(1, -1)
+        # 动态 Q
+        dynamic_scale = 1.0 + (cp_prob * 100.0)
+        current_Q = self.Q * dynamic_scale
+
+        x_pred = self.x
+        P_pred = self.P + current_Q
+
+        try:
+            P_pred_inv = np.linalg.inv(P_pred)
+            R_inv = np.linalg.inv(self.R)
+            HT_Rinv_H = H.T @ R_inv @ H
+            Gamma_term = self.I * (1.0 / (self.gamma_sq + 1e-9))
+            P_new_inv = P_pred_inv + HT_Rinv_H - Gamma_term
+            self.P = np.linalg.inv(P_new_inv)
+
+            if np.any(np.diag(self.P) < 0): self.P = np.eye(self.n) * 0.1
+
+            K = self.P @ H.T @ R_inv
+            innovation = y - H @ x_pred
+            self.x = x_pred + K @ innovation
+        except np.linalg.LinAlgError:
+            self.P *= 0.95
+        return self.x.flatten()
+
+
+class WaveletAnalyzer:
+    def __init__(self, wavelet='sym5', level=1):
+        self.wavelet, self.level, self.buffer = wavelet, level, []
+
+    def process(self, price):
+        self.buffer.append(price)
+        if len(self.buffer) > 32: self.buffer.pop(0)
+        if len(self.buffer) < 16: return price
+        data = np.array(self.buffer)
+        if len(data) % 2 != 0: data = np.pad(data, (0, 1), 'edge')
+        try:
+            coeffs = pywt.swt(data, self.wavelet, level=self.level)
+            threshold = np.median(np.abs(coeffs[0][1])) / 0.6745 * 1.5
+            new_coeffs = [(cA, pywt.threshold(cD, threshold, 'soft')) for cA, cD in coeffs]
+            return pywt.iswt(new_coeffs, self.wavelet)[-2 if len(self.buffer) % 2 != 0 else -1]
+        except:
+            return price
 
 
 class OnlineEGARCH:
-    def __init__(self, decay=0.75, alpha=0.05, theta=-0.05):
+    def __init__(self, decay=0.9, alpha=0.1, theta=-0.05):
         self.decay, self.alpha, self.theta = decay, alpha, theta
-        self.log_var, self.initialized = 0.0, False
+        self.log_var = 0.0
+        self.initialized = False
 
     def update(self, ret):
-        if not self.initialized: self.log_var = np.log(ret ** 2 + 1e-9); self.initialized = True; return abs(ret)
+        if not self.initialized:
+            self.log_var = np.log(ret ** 2 + 1e-9)
+            self.initialized = True
+            return abs(ret)
         prev_vol = math.sqrt(math.exp(self.log_var))
         std_resid = ret / (prev_vol + 1e-9)
-        self.log_var = max(
-            min(self.decay * self.log_var + (self.alpha * (abs(std_resid) - 0.7979) + self.theta * std_resid), 5), -10)
+        new_log = self.decay * self.log_var + (self.alpha * (abs(std_resid) - 0.7979) + self.theta * std_resid)
+        self.log_var = max(min(new_log, 5.0), -10.0)
         return math.sqrt(math.exp(self.log_var))
 
 
@@ -83,8 +130,17 @@ class WaveletAnalyzer:
         self.wavelet, self.level = wavelet, level
 
     def process(self, data_series):
+        # Handle scalar input
+        if np.isscalar(data_series):
+            return float(data_series), 0.0
+            
+        # Convert to numpy array
         data = np.array(data_series)
-        if len(data) < 16: return data[-1], 0.0
+        
+        # Handle insufficient data
+        if len(data) < 16: 
+            return float(data[-1]) if len(data) > 0 else 0.0, 0.0
+            
         mult = 2 ** self.level
         pad_len = mult - (len(data) % mult) if len(data) % mult != 0 else 0
         data_padded = np.pad(data, (0, pad_len), 'symmetric') if pad_len else data

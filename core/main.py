@@ -212,8 +212,10 @@ class QuantBot:
         # 6. UI更新
         unrealized_pnl = (curr_price - self.position['entry_price']) * self.position['size'] if self.position['size'] != 0 else 0
 
-        hf_pred_1m = getattr(self.brain.rf_classifier, 'last_hf_prediction', 0.0)
-        hf_pred_diff = self.brain.rf_classifier.price_prediction_diff if analysis else 0.0
+        # HF no longer predicts price, so use H-infinity signal instead
+        hf_signal = getattr(self.brain.rf_classifier, 'last_hf_signal', 0.0)
+        # HF no longer predicts price, so use 0.0 for price difference
+        hf_pred_diff = 0.0
         ai_conf = analysis.get('ai_prediction', (0, 0.0))[1] if analysis else 0.0
         cluster_data = analysis.get('cluster', (99, 0.0)) if analysis else (99, 0.0)
         cluster_id = cluster_data[0]
@@ -222,7 +224,7 @@ class QuantBot:
         self.ui.update_status(
             self.position['size'], self.brain.state, self.brain.color,
             obi, unrealized_pnl, curr_price,
-            hf_pred_1m, hf_pred_diff, ai_conf, cluster_id
+            hf_signal, hf_pred_diff, ai_conf, cluster_id
         )
 
         # Redis 心跳
@@ -236,7 +238,7 @@ class QuantBot:
                     "regime": self.brain.state,
                     "ai_conf": ai_conf,
                     "cluster": cluster_id,
-                    "hf_pred": hf_pred_1m
+                    "hf_pred": hf_signal  # Use H-infinity signal instead of price prediction
                 }
                 self.redis_client.set('bot_status_heartbeat', json.dumps(heartbeat_data))
             except Exception:

@@ -44,7 +44,7 @@ class DisplayManager:
             f"{status_icon} {color}{regime:<10}{Style.RESET_ALL} | "
             f"OBI:{obi:+.2f} | "
             f"P:{price:.4f} | "
-            f"HF:{hf_pred_1m:.4f} | "
+            f"HFS:{hf_pred_1m:.4f} | "  # H-infinity Signal (not price prediction)
             f"Df:{hf_pred_diff:+.4f} | "
             f"AI:{ai_conf:.2f} | "
             f"Cls:{cluster_display} | "

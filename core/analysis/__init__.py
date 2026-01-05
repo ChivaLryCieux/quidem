@@ -1,6 +1,6 @@
 from .indicators import MathUtils
-from .filters import HInfinityFilter1D, OnlineEGARCH, WaveletAnalyzer
+from .filters import MultivariateHInfinityFilter, OnlineEGARCH, WaveletAnalyzer
 from .transform import MomentumCalculator, RollingVolatilityCalculator, FractalAnalysis, OnlineBOCPD
 
-__all__ = ['MathUtils', 'HInfinityFilter1D', 'OnlineEGARCH', 'WaveletAnalyzer', 
+__all__ = ['MathUtils', 'MultivariateHInfinityFilter', 'OnlineEGARCH', 'WaveletAnalyzer', 
            'MomentumCalculator', 'RollingVolatilityCalculator', 'FractalAnalysis', 'OnlineBOCPD']
