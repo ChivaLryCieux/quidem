@@ -1,5 +1,6 @@
 import os
 import logging
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
@@ -10,8 +11,8 @@ class Config:
     PROXY_URL = f"http://{PROXY_HOST}:{PROXY_PORT}"
 
     # 交易所 API
-    API_KEY = "YOUR_BINANCE_API_KEY"
-    API_SECRET = "YOUR_BINANCE_API_SECRET"
+    API_KEY = os.getenv("BINANCE_API_KEY")
+    API_SECRET = os.getenv("BINANCE_SECRET")
 
     # 交易标的与参数
     SYMBOL = 'XRP/USDT'

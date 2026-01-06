@@ -267,6 +267,24 @@ class ExchangeService:
             logger.error(f"Order Execution Error: {e}")
             return False
 
+    def fetch_balance(self):
+        """获取账户余额信息"""
+        if not self.is_live:
+            return None
+            
+        try:
+            balance = self.client.fetch_balance()
+            # 返回USDT余额和总权益
+            usdt_balance = balance.get('USDT', {})
+            return {
+                'free': usdt_balance.get('free', 0.0),
+                'used': usdt_balance.get('used', 0.0),
+                'total': usdt_balance.get('total', 0.0)
+            }
+        except Exception as e:
+            logger.error(f"获取账户余额失败: {e}")
+            return None
+
     def close(self):
         self.ws_streamer.stop()
         try:

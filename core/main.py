@@ -92,6 +92,10 @@ class QuantBot:
             return
         self.ui.log_msg("交易所及WebSocket连接成功", "success")
 
+        # 获取并显示账户余额（实盘模式）
+        if self.is_live:
+            self._fetch_and_display_account_balance()
+
         # 预热: 使用 REST API 拉取历史数据
         self._warmup_models()
 
@@ -110,6 +114,19 @@ class QuantBot:
                 logger.error(f"Loop Error: {e}")
                 traceback.print_exc()
                 time.sleep(1)
+
+    def _fetch_and_display_account_balance(self):
+        """获取并显示账户余额（仅实盘模式）"""
+        try:
+            balance_info = self.exchange.fetch_balance()
+            if balance_info:
+                self.ui.log_msg(f"账户余额 - 可用: ${balance_info['free']:.2f} | 已用: ${balance_info['used']:.2f} | 总计: ${balance_info['total']:.2f}", "success")
+                # 更新内部余额变量为真实余额
+                self.balance = balance_info['total']
+            else:
+                self.ui.log_msg("无法获取账户余额，使用默认余额", "warning")
+        except Exception as e:
+            self.ui.log_msg(f"获取账户余额失败: {e}", "error")
 
     def _warmup_models(self):
         """将预热逻辑抽取为单独的方法，使run更清晰"""
