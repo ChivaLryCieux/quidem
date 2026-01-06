@@ -33,17 +33,63 @@ logger = logging.getLogger(__name__)
 # 机器人主引擎 (Trading Bot Engine)
 # ==========================================
 class QuantBot:
-    def __init__(self):
+    def __init__(self, mode_override=None):
         Config.setup_proxy()
         self.ui = DisplayManager()
         self.key_listener = KeyListener()
 
         # 用户选择模式
-        logger.info(f"请选择模式: [0] 退出 | [1] 模拟盘 (Paper) | [2] 实盘 (Live)")
-        mode = input("请输入数字: ").strip()
+        if mode_override:
+            # 使用命令行参数
+            mode = mode_override
+            logger.info(f"使用命令行参数模式: {mode}")
+        else:
+            # 交互式选择 - 使用简单可靠的输入方法
+            logger.info(f"请选择模式: [0] 退出 | [1] 模拟盘 (Paper) | [2] 实盘 (Live)")
+            max_attempts = 3
+            attempts = 0
+            mode = None
+            
+            while attempts < max_attempts:
+                try:
+                    import sys
+                    # 确保提示信息立即显示并清空输入缓冲区
+                    sys.stdout.flush()
+                    
+                    # 使用最基础的input函数，但添加超时和重试机制
+                    print("请输入数字: ", end="", flush=True)
+                    user_input = input().strip()
+                    
+                    logger.info(f"用户输入的模式数字: '{user_input}'")
+                    
+                    if user_input in ['0', '1', '2']:
+                        mode = user_input
+                        break
+                    else:
+                        attempts += 1
+                        if attempts < max_attempts:
+                            logger.warning(f"无效输入: '{user_input}'，请输入0、1或2。还剩{max_attempts - attempts}次尝试。")
+                        else:
+                            logger.error("多次无效输入，程序退出。")
+                            sys.exit(1)
+                            
+                except EOFError:
+                    logger.error("无法读取输入，可能是在非交互式环境中运行。请使用命令行参数: python run.py 1 (模拟盘) 或 python run.py 2 (实盘)")
+                    sys.exit(1)
+                except KeyboardInterrupt:
+                    logger.info("用户取消输入，程序退出。")
+                    sys.exit(0)
+                except Exception as e:
+                    logger.error(f"读取输入时发生错误: {e}")
+                    attempts += 1
+                    if attempts >= max_attempts:
+                        logger.error("多次输入错误，程序退出。")
+                        sys.exit(1)
+        
         if mode == '0': sys.exit(0)
         self.is_live = (mode == '2')
         self.mode_name = "实盘" if self.is_live else "模拟盘"
+        logger.info(f"设置的模式: is_live={self.is_live}, mode_name={self.mode_name}")  # 添加调试信息
 
         # 初始化服务
         self.exchange = ExchangeService(self.is_live)

@@ -167,9 +167,17 @@ class ExchangeService:
         }
 
         if is_live:
+            # 添加调试信息验证API密钥加载
+            logger.info(f"API_KEY loaded: {Config.API_KEY is not None}")
+            logger.info(f"API_SECRET loaded: {Config.API_SECRET is not None}")
+            logger.info(f"API_KEY length: {len(Config.API_KEY) if Config.API_KEY else 0}")
+            logger.info(f"API_SECRET length: {len(Config.API_SECRET) if Config.API_SECRET else 0}")
+            
             if not Config.API_KEY or not Config.API_SECRET:
                 logger.error("Live mode selected but API credentials missing!")
                 # 不抛出异常，允许程序继续运行(只读)，但在下单时会失败
+            else:
+                logger.info("API credentials found, configuring exchange client")
             conf.update({'apiKey': Config.API_KEY, 'secret': Config.API_SECRET})
 
         self.client = ccxt.binance(conf)
