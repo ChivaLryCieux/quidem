@@ -80,7 +80,8 @@ class StateMachine:
             self.last_cluster = cluster_id
 
         # 恢复默认阈值 0.4 (或更高，随你设定)
-        target_conf = 0.4
+        # Modified to 0.15 based on optimization plan (Tiered Threshold)
+        target_conf = 0.15
         is_signal = False
         match_reason = ""
 

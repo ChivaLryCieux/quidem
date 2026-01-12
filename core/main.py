@@ -204,6 +204,7 @@ class QuantBot:
 
                 # 初始化时间戳
                 self.current_candle_timestamp = initial_ohlcv_1m[-1][0]
+                self.ui.log_msg(f"模型预热完成: 处理了 {len(initial_ohlcv_1m)} 根1mK线", "success")
             else:
                 self.ui.log_msg("预热数据为空，请检查网络", "error")
                 # 即使预热失败，也可以选择是否继续或退出，这里选择暂时不强制退出，由用户决定

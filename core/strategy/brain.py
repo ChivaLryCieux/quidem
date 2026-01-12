@@ -65,7 +65,14 @@ class StrategyBrain:
         
         # SRP + PAR + EWA 训练
         self.rf_classifier.classifier_srp.learn_one(x, label)
-        self.rf_classifier.classifier_par.learn_one(x, label)
+        if label != 0:
+            self.rf_classifier.classifier_par.learn_one(x, label)
+            
+        # EWA 回归训练
+        # 简单使用平均值作为特征，这与 models.py 中的逻辑保持一致
+        reg_features = {'input': sum(feature_values) / len(feature_values)}
+        # 将分类标签转换为回归目标 (-1.0, 0.0, 1.0)
+        self.rf_classifier.ewa_ensemble.learn_one(reg_features, float(label))
 
     def get_entry_signal(self, analysis_data, current_price):
         return self.state_machine.get_entry_signal(analysis_data, current_price)

@@ -317,12 +317,12 @@ class SRP_PAR_EWA_Ensemble:
             final_pred_value = (srp_pred_value + par_pred_value) / 2
         
         # 转换回分类结果
-        if final_pred_value > 0.2:  # 看涨阈值
+        if final_pred_value > 0.08:  # 看涨阈值 (Lowered from 0.2)
             return 1, abs(final_pred_value)
-        elif final_pred_value < -0.2:  # 看跌阈值
+        elif final_pred_value < -0.08:  # 看跌阈值 (Lowered from 0.2)
             return -1, abs(final_pred_value)
         else:
-            return 0, 0.0
+            return 0, abs(final_pred_value)
 
     def on_candle_close(self, closed_candle_analysis, current_close_price):
         """
