@@ -104,23 +104,8 @@ class SRP_PAR_EWA_Ensemble:
         self.last_close_price = None
         self.training_features_buffer = None
         self.history = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'taker_buy'])
-
         self.train_count = 0
-
-        # Remove price prediction related variables
-        # self.price_prediction_diff = 0.0
-        # self.last_hf_prediction = 0.0
-        
-        # Add H-infinity signal tracking
         self.last_hf_signal = 0.0
-
-        # Remove hf_predictor_1m as we no longer predict prices
-        # self.hf_predictor_1m = compose.Pipeline(
-        #     preprocessing.StandardScaler(),
-        #     linear_model.LinearRegression()
-        # )
-
-        # New optimized H-infinity system components
         self.wavelet = WaveletAnalyzer()
         self.egarch = OnlineEGARCH()
         self.momentum_calc = MomentumCalculator(periods=[1, 5, 15, 30, 50, 96])
@@ -349,7 +334,7 @@ class SRP_PAR_EWA_Ensemble:
 
     def on_candle_close(self, closed_candle_analysis, current_close_price):
         """
-        SRP + PAR + EWA 在线学习更新
+        SRP + PAR + EWA 在线学习更新 - 固定阈值逻辑
         """
         if self.last_close_price is None:
             self.last_close_price = current_close_price
@@ -358,26 +343,24 @@ class SRP_PAR_EWA_Ensemble:
             return
 
         if self.training_features_buffer is not None:
+            # 1. 计算价格变化比例
             price_diff_pct = (current_close_price - self.last_close_price) / self.last_close_price
 
-            COST_THRESHOLD = 0.0015
+            # 2. 设置固定阈值 (0.15%)
+            FIXED_THRESHOLD = 0.0015
 
-            atr_val = closed_candle_analysis.get('atr', 0.0)
-
-            if atr_val > 0:
-                dynamic_threshold = max((atr_val / self.last_close_price) * 0.5, COST_THRESHOLD)
-            else:
-                dynamic_threshold = COST_THRESHOLD
-
+            # 3. 根据固定阈值生成标签
             label = 0
             regression_target = 0.0
-            if price_diff_pct > dynamic_threshold:
+
+            if price_diff_pct > FIXED_THRESHOLD:
                 label = 1
                 regression_target = 1.0
-            elif price_diff_pct < -dynamic_threshold:
+            elif price_diff_pct < -FIXED_THRESHOLD:
                 label = -1
                 regression_target = -1.0
             else:
+                label = 0
                 regression_target = 0.0
 
             # 确保训练特征中没有 None 值 (Sanitize)
@@ -387,29 +370,24 @@ class SRP_PAR_EWA_Ensemble:
                 feature_values.append(v)
             x = {f"f{i}": v for i, v in enumerate(feature_values)}
 
-            # SRP (Tree-based) 分类训练
+            # SRP 分类训练
             self.classifier_srp.learn_one(x, label)
-            
-            # PAR (Linear) 分类训练
+
+            # PAR 分类训练
             if label != 0:
                 self.classifier_par.learn_one(x, label)
-            
-            # EWA 回归训练 - 使用回归目标
-            # Sanitize regression inputs
+
+            # EWA 回归训练
             avg_feat = sum(feature_values) / len(feature_values)
-            if np.isnan(avg_feat) or np.isinf(avg_feat):
-                 avg_feat = 0.0
-            
-            reg_features = {'input': avg_feat} 
-            
-            if not np.isnan(regression_target) and not np.isinf(regression_target):
-                self.ewa_ensemble.learn_one(reg_features, regression_target)
+            reg_features = {'input': 0.0 if np.isnan(avg_feat) else avg_feat}
+            self.ewa_ensemble.learn_one(reg_features, regression_target)
 
             self.train_count += 1
 
             if label != 0:
-                print(f"[AI Learn] 波动:{atr_val:.4f} | 涨跌:{price_diff_pct:.2%} | Label:{label} | Target:{regression_target} (SRP+PAR+EWA三核更新)")
+                print(f"[AI Learn] 涨跌:{price_diff_pct:.2%} | Label:{label} | 固定阈值:{FIXED_THRESHOLD:.4f}")
 
+        # 更新基准用于下一轮学习
         self.last_close_price = current_close_price
         self.training_features_buffer = closed_candle_analysis['features']
 
