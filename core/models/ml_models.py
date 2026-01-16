@@ -137,6 +137,18 @@ class SRP_PAR_EWA_Ensemble:
         # Initialize cached analysis data
         self.cached_analysis_data = None
 
+    def _sanitize_value(self, v):
+        """Sanitize value to ensure it's a finite float."""
+        if v is None:
+            return 0.0
+        try:
+            v_float = float(v)
+            if np.isnan(v_float) or np.isinf(v_float):
+                return 0.0
+            return v_float
+        except Exception:
+            return 0.0
+
     def ingest_candle(self, candle, timeframe='1m', btc_change_pct=0.0, obi_value=0.0):
         if timeframe == '15m':
             # 15分钟K线用于主要特征计算和模型预测
@@ -250,6 +262,9 @@ class SRP_PAR_EWA_Ensemble:
             obi_value
         ]).reshape(1, -1)
         
+        # Sanitize features to remove NaNs and Infs before caching
+        features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+        
         self.cached_analysis_data = {
             'features': features, 'price': curr_price, 'atr': atr, 'rsi': rsi,
             'vol_explosion': vol_expl, 'hf_signal': hf_signal, 'wavelet_energy': 0.0,
@@ -267,19 +282,18 @@ class SRP_PAR_EWA_Ensemble:
         # 处理不同类型的特征输入
         if isinstance(features, dict):
             # 如果传入的是字典，直接使用
-            x = {f"f{i}": v if v is not None else 0.0 for i, v in enumerate(features.values())}
+            x = {f"f{i}": self._sanitize_value(v) for i, v in enumerate(features.values())}
         elif isinstance(features, np.ndarray):
             # 如果传入的是numpy数组，按原逻辑处理
+            # Ensure numpy array is sanitized first
+            sanitized_features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
             feature_values = []
-            for i, v in enumerate(features.flatten()):
-                if v is None:
-                    feature_values.append(0.0)
-                else:
-                    feature_values.append(v)
+            for i, v in enumerate(sanitized_features.flatten()):
+                feature_values.append(v)
             x = {f"f{i}": v for i, v in enumerate(feature_values)}
         else:
             # 其他类型，转换为字典
-            x = {f"f{i}": v if v is not None else 0.0 for i, v in enumerate(features)}
+            x = {f"f{i}": self._sanitize_value(v) for i, v in enumerate(features)}
 
         # SRP (Tree-based) 预测
         srp_probs = self.classifier_srp.predict_proba_one(x)
@@ -297,7 +311,12 @@ class SRP_PAR_EWA_Ensemble:
         par_pred_value = par_conf_1 - par_conf_minus_1
         
         # 创建特征用于EWA回归 - 使用单一特征简化
-        reg_features = {'ensemble_input': (srp_pred_value + par_pred_value) / 2}
+        # Sanitize ensemble inputs
+        ens_input = (srp_pred_value + par_pred_value) / 2
+        if np.isnan(ens_input) or np.isinf(ens_input):
+            ens_input = 0.0
+            
+        reg_features = {'ensemble_input': ens_input}
         
         # 获取EWA动态权重 - 使用简单加权平均作为回退
         try:
@@ -307,15 +326,19 @@ class SRP_PAR_EWA_Ensemble:
                 if ewa_pred is not None:
                     final_pred_value = ewa_pred
                 else:
-                    final_pred_value = (srp_pred_value + par_pred_value) / 2
+                    final_pred_value = ens_input
             else:
                 # 初始阶段使用简单平均
-                final_pred_value = (srp_pred_value + par_pred_value) / 2
+                final_pred_value = ens_input
                 self._ewa_initialized = True
         except Exception as e:
             logger.warning(f"EWA预测失败: {e}，使用简单平均")
-            final_pred_value = (srp_pred_value + par_pred_value) / 2
+            final_pred_value = ens_input
         
+        # Sanitize final prediction value
+        if np.isnan(final_pred_value) or np.isinf(final_pred_value):
+            final_pred_value = 0.0
+            
         # 转换回分类结果
         if final_pred_value > 0.08:  # 看涨阈值 (Lowered from 0.2)
             return 1, abs(final_pred_value)
@@ -357,13 +380,11 @@ class SRP_PAR_EWA_Ensemble:
             else:
                 regression_target = 0.0
 
-            # 确保训练特征中没有 None 值
+            # 确保训练特征中没有 None 值 (Sanitize)
+            sanitized_buffer = np.nan_to_num(self.training_features_buffer, nan=0.0, posinf=0.0, neginf=0.0)
             feature_values = []
-            for i, v in enumerate(self.training_features_buffer.flatten()):
-                if v is None:
-                    feature_values.append(0.0)
-                else:
-                    feature_values.append(v)
+            for i, v in enumerate(sanitized_buffer.flatten()):
+                feature_values.append(v)
             x = {f"f{i}": v for i, v in enumerate(feature_values)}
 
             # SRP (Tree-based) 分类训练
@@ -374,8 +395,15 @@ class SRP_PAR_EWA_Ensemble:
                 self.classifier_par.learn_one(x, label)
             
             # EWA 回归训练 - 使用回归目标
-            reg_features = {'input': sum(feature_values) / len(feature_values)}  # 简化特征
-            self.ewa_ensemble.learn_one(reg_features, regression_target)
+            # Sanitize regression inputs
+            avg_feat = sum(feature_values) / len(feature_values)
+            if np.isnan(avg_feat) or np.isinf(avg_feat):
+                 avg_feat = 0.0
+            
+            reg_features = {'input': avg_feat} 
+            
+            if not np.isnan(regression_target) and not np.isinf(regression_target):
+                self.ewa_ensemble.learn_one(reg_features, regression_target)
 
             self.train_count += 1
 

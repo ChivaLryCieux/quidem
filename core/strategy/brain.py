@@ -55,12 +55,10 @@ class StrategyBrain:
     def train_ai(self, features, label):
         # 兼容旧接口，虽然 on_candle_close 更好
         # 将 numpy 展平转 dict，确保没有 None 值
+        sanitized_features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
         feature_values = []
-        for i, v in enumerate(features.flatten()):
-            if v is None:
-                feature_values.append(0.0)
-            else:
-                feature_values.append(v)
+        for i, v in enumerate(sanitized_features.flatten()):
+            feature_values.append(v)
         x = {f"f{i}": v for i, v in enumerate(feature_values)}
         
         # SRP + PAR + EWA 训练
@@ -70,7 +68,11 @@ class StrategyBrain:
             
         # EWA 回归训练
         # 简单使用平均值作为特征，这与 models.py 中的逻辑保持一致
-        reg_features = {'input': sum(feature_values) / len(feature_values)}
+        avg_feat = sum(feature_values) / len(feature_values)
+        if np.isnan(avg_feat) or np.isinf(avg_feat):
+            avg_feat = 0.0
+            
+        reg_features = {'input': avg_feat}
         # 将分类标签转换为回归目标 (-1.0, 0.0, 1.0)
         self.rf_classifier.ewa_ensemble.learn_one(reg_features, float(label))
 
