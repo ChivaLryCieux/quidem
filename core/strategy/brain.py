@@ -3,7 +3,7 @@ import pandas as pd
 import logging
 from colorama import Fore, Style
 
-from core.models.OnlineModels import SRP_PAR_EWA_Ensemble
+from core.models.online_models import SRP_PAR_EWA_Ensemble
 from core.models.cluster import KMeansClusterAnalyzer
 from core.strategy.analyzers import OrderBookAnalyzer, StateMachine
 from core.strategy.signals import SignalGenerator

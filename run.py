@@ -1,6 +1,6 @@
 # 模拟盘与实盘的顶层入口文件
 import sys
-from core.main import QuantBot
+from core.engine.bot import QuantBot
 
 if __name__ == "__main__":
     # 支持命令行参数选择模式
