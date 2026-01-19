@@ -3,7 +3,7 @@ import pandas as pd
 import logging
 from colorama import Fore, Style
 
-from core.models.online_models import SRP_PAR_EWA_Ensemble
+from core.models.online_models import SRP_PAR_Ensemble
 from core.models.cluster import KMeansClusterAnalyzer
 from core.strategy.analyzers import OrderBookAnalyzer, StateMachine
 from core.strategy.signals import SignalGenerator
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # ==========================================
 class StrategyBrain:
     def __init__(self):
-        self.rf_classifier = SRP_PAR_EWA_Ensemble()
+        self.rf_classifier = SRP_PAR_Ensemble()
         self.state_machine = StateMachine()
         self.cluster_analyzer = KMeansClusterAnalyzer()
         self.signal_generator = SignalGenerator()
