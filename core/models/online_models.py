@@ -28,7 +28,6 @@ class SRP_PAR_Ensemble:
 
     def _init_models(self):
         # 1. SRP - Hoeffding Tree (适合非线性关系)
-        # 注意：移除了 Pipeline 中的 StandardScaler，因为我们在外部统一做
         self.model_srp = tree.HoeffdingTreeClassifier(
             grace_period=100,  # 增加宽限期，让树更成熟再分裂
             delta=1e-5,
@@ -108,8 +107,8 @@ class SRP_PAR_Ensemble:
         # 信心 = 得分的绝对值
         confidence = abs(final_score)
 
-        # 你的阈值逻辑：0.08
-        threshold = 0.08
+        # 信心阈值逻辑
+        threshold = 0.25
 
         if final_score > threshold:
             return 1, confidence

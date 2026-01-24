@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 class Config:
     # 代理与网络
-    PROXY_PORT = 7897
+    PROXY_PORT = 7890
     PROXY_HOST = "127.0.0.1"
     PROXY_URL = f"http://{PROXY_HOST}:{PROXY_PORT}"
 
@@ -31,7 +31,7 @@ class Config:
     MAX_FUNDING_RATE_THRESHOLD = 0.0005
 
     # 策略参数
-    BAILOUT_ON_NTH_FLIP = 3
+    BAILOUT_ON_NTH_FLIP = 5
     FEE_BUFFER_PCT = 0.0012
     MIN_ATR_PCT = 0.0020
     MIN_TP_DISTANCE = 0.003

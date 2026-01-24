@@ -4,7 +4,7 @@ import logging
 from colorama import Fore, Style
 
 from core.models.online_models import SRP_PAR_Ensemble
-from core.models.cluster import KMeansClusterAnalyzer
+from core.models.hmm_engine import HMMStateEngine
 from core.strategy.analyzers import OrderBookAnalyzer, StateMachine
 from core.strategy.signals import SignalGenerator
 
@@ -18,7 +18,7 @@ class StrategyBrain:
     def __init__(self):
         self.rf_classifier = SRP_PAR_Ensemble()
         self.state_machine = StateMachine()
-        self.cluster_analyzer = KMeansClusterAnalyzer()
+        self.hmm_engine = HMMStateEngine()
         self.signal_generator = SignalGenerator()
         self.state = self.state_machine.state
         self.color = self.state_machine.color
@@ -44,11 +44,11 @@ class StrategyBrain:
         ai_dir, ai_conf = self.rf_classifier.predict(feature_data['features'])
         feature_data['ai_prediction'] = (ai_dir, ai_conf)
 
-        cluster_id, cluster_dist = self.cluster_analyzer.predict_cluster(
+        state_id, state_confidence = self.hmm_engine.predict_state(
             feature_data.get('momentum_values'),
             feature_data.get('volatility_values')
         )
-        feature_data['cluster'] = (cluster_id, cluster_dist)
+        feature_data['cluster'] = (state_id, state_confidence)
 
         return feature_data
 

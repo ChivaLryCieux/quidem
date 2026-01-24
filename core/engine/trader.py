@@ -46,12 +46,35 @@ class TradeExecutor:
                 })
                 self.last_snapshot_time = now
 
-        # 2. 持仓管理
+        # 2. HMM 状态强制平仓逻辑（优先级最高）
+        if analysis_data and self.position['size'] != 0:
+            state_id = analysis_data.get('cluster', (99, 0.0))[0]
+            
+            # State 2: 震荡/噪音 - 强制平掉所有持仓
+            if state_id == 2:
+                logger.warning(f"⚠️ State 2 震荡检测 - 强制平仓")
+                self.execute_exit("State 2 震荡 - 强制平仓", curr_price, funding_rate)
+                return
+            
+            # State 0: 大跌 - 如果持有多单，强制平仓
+            if state_id == 0 and self.position['size'] > 0:
+                logger.warning(f"⚠️ State 0 大跌检测 - 强制平多单")
+                self.execute_exit("State 0 大跌 - 平多单", curr_price, funding_rate)
+                return
+            
+            # State 4: 大涨 - 如果持有空单，强制平仓
+            if state_id == 4 and self.position['size'] < 0:
+                logger.warning(f"⚠️ State 4 大涨检测 - 强制平空单")
+                self.execute_exit("State 4 大涨 - 平空单", curr_price, funding_rate)
+                return
+
+        # 3. 持仓管理
         if self.position['size'] != 0:
             self._manage_position(curr_price, funding_rate)
 
-        # 3. 开仓逻辑
+        # 4. 开仓逻辑
         self._check_entry(analysis_data, curr_price, funding_rate, timestamp)
+
 
     def _manage_position(self, curr_price, funding_rate):
         pos = self.position

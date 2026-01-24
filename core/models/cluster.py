@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 class KMeansClusterAnalyzer:
     def __init__(self, n_clusters=7):
         self.n_clusters = n_clusters
-        # 更新窗口列表以匹配kmeans.py版本
         self.windows = [1, 5, 15, 30, 50, 96]
         self.feature_names = []
         # 生成特征名称列表

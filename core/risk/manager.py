@@ -33,12 +33,12 @@ class RiskManager:
         entry_time = position_data['entry_time']
         tp, sl = position_data['tp'], position_data['sl']
 
-        # 基础止损止盈检查
+        # 基础止损止盈检查（止损已禁用，仅保留止盈）
         if pos_size > 0:
-            if current_price <= sl: return True, "🛑 SL"
+            # if current_price <= sl: return True, "🛑 SL"  # 止损已禁用
             if current_price >= tp: return True, "💰 TP"
         else:
-            if current_price >= sl: return True, "🛑 SL"
+            # if current_price >= sl: return True, "🛑 SL"  # 止损已禁用
             if current_price <= tp: return True, "💰 TP"
 
         # 计算当前盈亏百分比

@@ -93,6 +93,10 @@ class DisplayManager:
 
         status_icon = "🟢" if pos > 0 else "🔴" if pos < 0 else "⚪"
         pnl_c = Fore.GREEN if pnl >= 0 else Fore.RED
+        
+        # HMM 状态名称映射
+        state_names = {0: "跌", 1: "弱跌", 2: "震荡", 3: "弱涨", 4: "涨", 99: "初始"}
+        state_name = state_names.get(cluster_id, "?")
 
         # 状态栏格式化
         # \033[K 确保清除上一帧残留的字符
@@ -104,7 +108,7 @@ class DisplayManager:
             f"P:{price:<8.4f} | "  # 左对齐，保留4位小数
             f"HF:{hf_signal:>+6.3f} | "  # H-infinity 信号
             f"AI:{ai_conf:>4.2f} | "  # AI 置信度
-            f"C{cluster_id} | "  # 聚类ID
+            f"S{cluster_id}({state_name}) | "  # 状态ID + 名称
             f"{pnl_c}${pnl:>+7.2f}{Style.RESET_ALL}"  # PnL 右对齐
         )
 

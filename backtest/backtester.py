@@ -1,32 +1,21 @@
 """
-回测器使用方法
+回测器 - 基于现有 core 模块的统一回测系统
 
-快速开始（默认使用 Binance U 本位合约数据源）：
+使用示例：
   python backtest/backtester.py --symbol XRP/USDT --balance 100
-
-按最近 N 天回测：
   python backtest/backtester.py --symbol XRP/USDT --lookback-days 30
-
-指定时间区间（本地时区由 pandas 解析，最终转为毫秒时间戳）：
   python backtest/backtester.py --symbol XRP/USDT --since "2025-01-01" --end "2025-02-01"
 
-绘图与降采样（适合一年级别回测）：
-  python backtest/backtester.py --symbol XRP/USDT --lookback-days 365 --plot-resample 15T --plot-max-points 12000 --plot-dpi 180 --plot-figsize 16,9
-
-输出文件：
-  默认输出到 backtest/outputs/YYYYMMDD_HHMMSS/
-  - 01_price.png        价格与交易标记（含成交价 vs close 的偏差细线）
-  - 02_equity_curve.png 权益曲线（标题统计杠杆与注资次数/总额）
-  - 03_drawdown.png     回撤曲线
-  - backtest_YYYYMMDD_HHMMSS.csv 交易明细（开/平仓）
-
-常用参数：
-  --slippage            滑点（小数），例如 0.0002 = 2bps
-  --limit-1m/--limit-15m 拉取的 1m/15m K 线数量上限
-  --plot-resample       绘图K线聚合规则（pandas resample 规则），例如 5T/15T/1H/4H/1D
-  --plot-no-trades      不绘制交易标记
-  --plot-no-drawdown    不输出回撤图
+输出文件（默认保存到 backtest/outputs/YYYYMMDD_HHMMSS/）：
+  - 01_price.png: 价格与交易标记
+  - 02_equity_curve.png: 权益曲线
+  - 03_drawdown.png: 回撤曲线
+  - backtest_YYYYMMDD_HHMMSS.csv: 交易明细
 """
+
+# ========== 回测超参数配置 ==========
+KLINE_LIMIT_15M = 35000  # 15分钟K线数量
+KLINE_LIMIT_1M = 500000  # 1分钟K线数量
 
 import os
 import sys
@@ -44,31 +33,20 @@ import time
 plt.style.use('seaborn-v0_8-darkgrid')
 plt.rcParams['axes.unicode_minus'] = False
 
-# 绘图字体优先级：优先选择常见中文字体，避免中文/负号显示异常
-_preferred_fonts = [
-    "Microsoft YaHei",
-    "SimHei",
-    "SimSun",
-    "Noto Sans CJK SC",
-    "WenQuanYi Micro Hei",
-    "Arial Unicode MS",
-    "DejaVu Sans",
-]
+_preferred_fonts = ["Microsoft YaHei", "SimHei", "SimSun", "Noto Sans CJK SC", "WenQuanYi Micro Hei", "Arial Unicode MS", "DejaVu Sans"]
 _available_font_names = {f.name for f in fm.fontManager.ttflist}
 _chosen_font = next((n for n in _preferred_fonts if n in _available_font_names), None)
 if _chosen_font:
     plt.rcParams["font.family"] = "sans-serif"
     plt.rcParams["font.sans-serif"] = [_chosen_font]
 
-# 允许直接运行脚本时导入项目内部模块
 root = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(root)
 sys.path.append(os.path.join(root, "core"))
 
 from core.config import Config
 from core.strategy import StrategyBrain
-from core.risk_manager import RiskManager
-from core.math_tools import MathUtils
+from core.risk import RiskManager
 
 def _make_exchange(use_proxy=True):
     conf = {'enableRateLimit': True, 'options': {'defaultType': 'future'}}
@@ -231,21 +209,19 @@ class StrategyBacktesterUnified:
         usable_balance = max(self.balance, 0)
         eprice = self._apply_entry_slippage(sig, price)
         
-        atr_15m = getattr(self.brain.rf_classifier, "atr_15m_last", 0.0)
+        atr_15m = analysis.get('atr', 0.0) if analysis else 0.0
         atr_1m = analysis.get('atr', 0.0) if analysis else 0.0
         curr_rsi = analysis.get('rsi', 50.0)
         cluster_info = analysis.get('cluster', (99, 0))
 
-        tp_dist = max(atr_15m * 2, eprice * Config.MIN_TP_DISTANCE)
+        tp_dist = max(atr_15m * 3, eprice * Config.MIN_TP_DISTANCE)
         sl_atr = atr_15m if atr_15m > 0 else atr_1m
-        sl_atr_mult = float(getattr(Config, "BACKTEST_SL_ATR_MULT", 1.5))
-        sl_dist = max(sl_atr * sl_atr_mult, eprice * Config.MIN_TP_DISTANCE)
+        sl_dist = max(sl_atr * 10.0, eprice * 0.05)
 
         risk_pct = float(getattr(Config, "RISK_APPETITE", 0.03))
         risk_budget = max(0.0, usable_balance * risk_pct)
-        amt_by_risk = (risk_budget / sl_dist) if sl_dist > 0 else 0.0
         amt_by_margin = (usable_balance * 0.98) / ((1 / lev) + Config.TAKER_FEE_RATE) / price
-        amt = max(0.0, min(amt_by_risk, amt_by_margin))
+        amt = max(0.0, amt_by_margin)
         
         if amt * price < 5.0:
             return
@@ -364,14 +340,14 @@ class StrategyBacktesterUnified:
         triggered, reason, exit_price = False, "", 0.0
         
         if pos['size'] > 0:
-            if l <= pos['sl']:
-                exit_price, reason, triggered = self._apply_exit_slippage("sell", pos['sl']), "🛑 SL (Intra)", True
-            elif h >= pos['tp']:
+            # if l <= pos['sl']:  # 止损已禁用
+            #     exit_price, reason, triggered = self._apply_exit_slippage("sell", pos['sl']), "🛑 SL (Intra)", True
+            if h >= pos['tp']:
                 exit_price, reason, triggered = self._apply_exit_slippage("sell", pos['tp']), "💰 TP (Intra)", True
         else:
-            if h >= pos['sl']:
-                exit_price, reason, triggered = self._apply_exit_slippage("buy", pos['sl']), "🛑 SL (Intra)", True
-            elif l <= pos['tp']:
+            # if h >= pos['sl']:  # 止损已禁用
+            #     exit_price, reason, triggered = self._apply_exit_slippage("buy", pos['sl']), "🛑 SL (Intra)", True
+            if l <= pos['tp']:
                 exit_price, reason, triggered = self._apply_exit_slippage("buy", pos['tp']), "💰 TP (Intra)", True
                 
         if triggered:
@@ -418,14 +394,10 @@ class StrategyBacktesterUnified:
                 
                 res15 = self.brain.analyze()
                 
-                # 训练标签：用当前 15m bar 的涨跌幅与 ATR 阈值生成 1/-1/0
-                diff = float(c15[4]) - float(c15[1])
-                atr_val = getattr(self.brain.rf_classifier, "atr_15m_last", 0.0)
-                th = atr_val * getattr(Config, "LABEL_ATR_MULT", 0.5) if atr_val > 0 else float(Config.MIN_TP_DISTANCE)
-                label = 1 if diff > th else (-1 if diff < -th else 0)
-                
-                if res15 and 'features' in res15 and res15['features'] is not None:
-                    self.brain.train_ai(res15['features'], label)
+                # 使用 on_candle_close 进行在线训练
+                if res15:
+                    close_price = float(c15[4])
+                    self.brain.on_candle_close(res15, close_price)
                 
                 # 15分钟K线收盘时检查开仓机会
                 if self.position['size'] == 0 and res15 and not self.risk.is_in_cooldown(now_ms=int(c15[0])):
@@ -723,8 +695,8 @@ if __name__ == "__main__":
     parser.add_argument("--symbol", type=str, default=Config.SYMBOL)
     parser.add_argument("--balance", type=float, default=100.0)
     parser.add_argument("--slippage", type=float, default=0.0002)
-    parser.add_argument("--limit-1m", type=int, default=500000)
-    parser.add_argument("--limit-15m", type=int, default=34000)
+    parser.add_argument("--limit-1m", type=int, default=KLINE_LIMIT_1M)
+    parser.add_argument("--limit-15m", type=int, default=KLINE_LIMIT_15M)
     parser.add_argument("--save", type=str, default="")
     parser.add_argument("--since-ms", type=int, default=None)
     parser.add_argument("--end-ms", type=int, default=None)
