@@ -1,9 +1,11 @@
 
 import numpy as np
 import pandas as pd
-from core.analysis.indicators import MathUtils
-from core.analysis.filters import MultivariateHInfinityFilter, OnlineEGARCH, WaveletAnalyzer
-from core.analysis.transform import MomentumCalculator, RollingVolatilityCalculator, FractalAnalysis, OnlineBOCPD
+from core.analysis.lib_indicators import MultivariateHInfinityFilter, WaveletAnalyzer, OnlineBOCPD
+from core.analysis.raw_indicators import (
+    MomentumCalculator, OnlineEGARCH, RollingVolatilityCalculator, 
+    FractalAnalysis, MathUtils
+)
 
 class FeatureEngineer:
     """
