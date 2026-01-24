@@ -26,7 +26,7 @@ N_CLUSTERS = 7  # 聚类数量 K
 WARMUP = max(WINDOWS) + 10
 
 # 代理设置 (根据您的实际环境调整)
-PROXY_URL = 'http://127.0.0.1:7897'
+PROXY_URL = 'http://127.0.0.1:7890'
 PROXIES = {
     'http': PROXY_URL,
     'https': PROXY_URL,

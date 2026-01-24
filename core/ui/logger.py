@@ -10,7 +10,7 @@ class UILogger:
         self.logger = logging.getLogger(name)
         self.logger.setLevel(log_level)
 
-        # [优化] 防止重复添加 Handler (关键：避免日志重复打印)
+        # 防止重复添加 Handler (关键：避免日志重复打印)
         if self.logger.hasHandlers():
             return
 
@@ -19,18 +19,18 @@ class UILogger:
         # [优化] exist_ok=True 避免竞态条件报错
         os.makedirs(log_dir, exist_ok=True)
 
-        # [优化] 使用固定的日志前缀，方便归档
+        # 使用固定的日志前缀，方便归档
         # 注意：这里保留了时间戳文件名，但在生产环境中通常建议用 logs/trading.log 并自动轮转
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         log_filename = os.path.join(log_dir, f"trading_{timestamp}.log")
 
-        # [优化] 格式化器：对齐列宽，提升可读性
+        # 格式化器：对齐列宽，提升可读性
         formatter = logging.Formatter(
             '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
 
-        # [优化] 使用 RotatingFileHandler 防止磁盘写满
+        # 使用 RotatingFileHandler 防止磁盘写满
         # maxBytes=10MB, backupCount=5 (最多保留50MB日志)
         file_handler = RotatingFileHandler(
             log_filename,
@@ -42,7 +42,7 @@ class UILogger:
         file_handler.setFormatter(formatter)
         self.logger.addHandler(file_handler)
 
-        # [注意] 控制台处理器 (StreamHandler)
+        # 控制台处理器 (StreamHandler)
         # 如果你的 display.py 已经接管了屏幕显示，这里再输出到控制台会破坏 UI。
         # 建议：仅当没有 UI 系统接管时才启用控制台日志。
         # 为了保持接口兼容，这里保留它，但建议在 main.py 的 logging 配置中统一管理。

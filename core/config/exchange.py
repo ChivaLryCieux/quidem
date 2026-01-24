@@ -17,7 +17,7 @@ class MarketDataStreamer(threading.Thread):
         self.daemon = True
         self.ws = None
 
-        # [优化] Binance Stream 名称必须小写，强制转换防止配置错误
+        # Binance Stream 名称必须小写，强制转换防止配置错误
         symbol_lower = Config.SYMBOL_WS.lower()
         self.url = (
             f"wss://fstream.binance.com/stream?streams="
@@ -63,7 +63,7 @@ class MarketDataStreamer(threading.Thread):
                         "proxy_type": "http"
                     }
 
-                # [优化] Ping/Pong 保持连接活跃
+                # Ping/Pong 保持连接活跃
                 self.ws.run_forever(ping_interval=30, ping_timeout=10, **proxy_opts)
             except Exception as e:
                 logger.error(f"WS Critical Error: {e}")
@@ -116,7 +116,7 @@ class MarketDataStreamer(threading.Thread):
                 if 'r' in payload:
                     updates['funding_rate'] = float(payload['r'])
 
-            # [优化] 快速更新，减少锁占用时间
+            # 快速更新，减少锁占用时间
             with self.lock:
                 self.data.update(updates)
 
@@ -144,12 +144,6 @@ class MarketDataStreamer(threading.Thread):
             self.ws.close()
 
     def get_latest(self):
-        """
-        线程安全地获取最新数据
-        [优化] 移除 deepcopy，改为浅拷贝。
-        因为 _on_message 中是整块替换 list/dict 引用，而不是原地修改，
-        所以浅拷贝返回的引用指向的数据是安全的，且速度快 100 倍以上。
-        """
         with self.lock:
             return self.data.copy()
 
@@ -158,7 +152,7 @@ class ExchangeService:
     def __init__(self, is_live=False):
         self.is_live = is_live
 
-        # [优化] 增加 timeout 防止网络卡死
+        # 增加 timeout 防止网络卡死
         conf = {
             'enableRateLimit': True,
             'timeout': 10000,  # 10秒超时
@@ -252,7 +246,7 @@ class ExchangeService:
             return True
 
         try:
-            # [优化] 记录下单请求，方便调试
+            # 记录下单请求，方便调试
             logger.info(f"[LIVE EXEC] {side.upper()} {amount} | Params: {params}")
 
             # create_market_order 是同步阻塞的，timeout 由 ccxt 配置控制
