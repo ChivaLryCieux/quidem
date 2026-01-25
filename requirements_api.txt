@@ -1,0 +1,7 @@
+# FastAPI后端依赖
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+python-dotenv==1.0.0
+redis==5.0.1
+python-multipart==0.0.6
