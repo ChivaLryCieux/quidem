@@ -272,7 +272,12 @@ class ExchangeService:
     def fetch_balance(self):
         """获取账户余额信息"""
         if not self.is_live:
-            return None
+            # 模拟盘返回默认余额100 USDT
+            return {
+                'free': 100.0,
+                'used': 0.0,
+                'total': 100.0
+            }
             
         try:
             balance = self.client.fetch_balance()

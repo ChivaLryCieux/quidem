@@ -94,9 +94,8 @@ class QuantBot:
             return
         self.ui.log_msg("Exchange Connected", "success")
 
-        # Fetch Balance
-        if self.is_live:
-            self._fetch_balance()
+        # Fetch Balance (both live and paper)
+        self._fetch_balance()
 
         # Warmup
         self._warmup_models()
@@ -118,8 +117,11 @@ class QuantBot:
         try:
             info = self.exchange.fetch_balance()
             if info:
-                self.ui.log_msg(f"Balance: Free ${info['free']:.2f} | Total ${info['total']:.2f}", "success")
+                mode_label = "实盘" if self.is_live else "模拟盘"
+                self.ui.log_msg(f"{mode_label} Balance: Free ${info['free']:.2f} | Total ${info['total']:.2f}", "success")
                 self.trader.update_balance(info['total'])
+            else:
+                self.ui.log_msg("Failed to fetch balance", "error")
         except Exception as e:
             self.ui.log_msg(f"Fetch Balance Failed: {e}", "error")
 
