@@ -79,19 +79,19 @@ class StateMachine:
             print(f" 🔄 状态变更: {self.last_cluster}({state_names.get(self.last_cluster, '?')}) -> {state_id}({state_names.get(state_id, '?')})")
             self.last_cluster = state_id
 
-        # === 新的 5 状态 HMM 策略逻辑 ===
+        # ===  5 状态 HMM 策略逻辑 ===
         is_signal = False
         match_reason = ""
         
         if state_id == 0:
-            # State 0: 极度恐慌/大跌 - 只做空，信心阈值 0.3
-            if ai_dir == -1 and ai_conf > 0.3:
+            # State 0: 极度恐慌/大跌 - 只做空，信心阈值 0.1
+            if ai_dir == -1 and ai_conf > 0.1:
                 sig, lev, is_signal = -1, 5, True
                 match_reason = f"State 0 大跌+AI看跌{ai_conf:.2f}"
         
         elif state_id == 1:
-            # State 1: 阴跌/弱势 - 尝试做空，信心阈值 0.5
-            if ai_dir == -1 and ai_conf > 0.5:
+            # State 1: 阴跌/弱势 - 尝试做空，信心阈值 0.15
+            if ai_dir == -1 and ai_conf > 0.15:
                 sig, lev, is_signal = -1, 5, True
                 match_reason = f"State 1 弱跌+AI看跌{ai_conf:.2f}"
         
@@ -101,14 +101,14 @@ class StateMachine:
             match_reason = "State 2 震荡+空仓观望"
         
         elif state_id == 3:
-            # State 3: 反弹/弱势上涨 - 尝试做多，信心阈值 0.5
-            if ai_dir == 1 and ai_conf > 0.5:
+            # State 3: 反弹/弱势上涨 - 尝试做多，信心阈值 0.15
+            if ai_dir == 1 and ai_conf > 0.15:
                 sig, lev, is_signal = 1, 5, True
                 match_reason = f"State 3 弱涨+AI看涨{ai_conf:.2f}"
         
         elif state_id == 4:
-            # State 4: 主升浪/大涨 - 只做多，信心阈值 0.3
-            if ai_dir == 1 and ai_conf > 0.3:
+            # State 4: 主升浪/大涨 - 只做多，信心阈值 0.1
+            if ai_dir == 1 and ai_conf > 0.1:
                 sig, lev, is_signal = 1, 5, True
                 match_reason = f"State 4 大涨+AI看涨{ai_conf:.2f}"
         

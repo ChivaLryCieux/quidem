@@ -26,6 +26,9 @@ logger = logging.getLogger("ReportRunner")
 
 service = ReportService()
 
+# 状态映射字典
+STATE_NAMES = {0: "大跌", 1: "弱跌", 2: "震荡", 3: "弱涨", 4: "大涨", 99: "初始"}
+
 def job():
     logger.info("Starting Report Job...")
     r = service.redis_client
@@ -55,9 +58,14 @@ def job():
                 with open(csv_path, 'rb') as f:
                     csv_content = list(f.read())
             
+            # 获取当前状态
+            last_trade = trades[-1]
+            current_state_id = last_trade.get('cluster', 99)
+            current_state_name = STATE_NAMES.get(current_state_id, "未知")
+            
             params = {
                 "from": MAIL_FROM, "to": MAIL_TO,
-                "subject": f"📊 [Report] XRP Bot | {len(trades)} Trades",
+                "subject": f"📊 [Report] XRP Bot | {len(trades)} Trades | 状态: {current_state_name}",
                 "html": html,
                 "attachments": [{"filename": csv_name, "content": csv_content}] if csv_content else []
             }
@@ -71,9 +79,13 @@ def job():
             html = service.generate_heartbeat_html(status)
             bal = status.get('balance', 0) if status else 0
             
+            # 获取当前状态
+            current_state_id = status.get('cluster', 99) if status else 99
+            current_state_name = STATE_NAMES.get(current_state_id, "未知")
+            
             params = {
                 "from": MAIL_FROM, "to": MAIL_TO,
-                "subject": f"😴 [Silence] XRP Bot | Bal: ${bal:.2f}",
+                "subject": f"😴 [Silence] XRP Bot | Bal: ${bal:.2f} | 状态: {current_state_name}",
                 "html": html
             }
             resend.Emails.send(params)

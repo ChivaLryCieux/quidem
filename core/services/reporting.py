@@ -121,6 +121,9 @@ class ReportService:
     def generate_trade_report_html(self, trades):
         if not trades: return None
         
+        # 状态映射字典
+        state_names = {0: "大跌", 1: "弱跌", 2: "震荡", 3: "弱涨", 4: "大涨", 99: "初始"}
+        
         # Stats
         df = pd.DataFrame(trades)
         total_pnl = df['pnl'].sum()
@@ -130,6 +133,10 @@ class ReportService:
         losses = df[df['pnl'] <= 0]
         win_rate = len(wins)/len(df)*100
         pf = (wins['pnl'].sum() / abs(losses['pnl'].sum())) if len(losses) > 0 else 0
+        
+        # 获取当前状态
+        current_state_id = df.iloc[-1].get('cluster', 99)
+        current_state_name = state_names.get(current_state_id, "未知")
         
         # Drawdown
         bals = df['balance'].values
@@ -149,12 +156,17 @@ class ReportService:
             pnl_color = "green" if t['pnl'] >= 0 else "red"
             entry_dt = datetime.fromtimestamp(t['entry_time']/1000).strftime('%H:%M')
             
+            # 获取交易时的状态
+            trade_state_id = t.get('cluster', 99)
+            trade_state_name = state_names.get(trade_state_id, "未知")
+            
             rows += f"""
             <tr>
                 <td>{entry_dt}</td>
                 <td><b>{t['action']}</b> <span style="font-size:10px;color:#999">x{t.get('leverage','?')}</span></td>
                 <td style="color:{pnl_color}"><b>${t['pnl']:.2f}</b></td>
                 <td>{spark_html}</td>
+                <td style="font-size:11px">S{trade_state_id}({trade_state_name})</td>
                 <td style="font-size:11px">{t.get('reason','')}</td>
             </tr>
             """
@@ -180,9 +192,12 @@ class ReportService:
                 <div class="card"><div class="val">{pf:.2f}</div><div>Profit Factor</div></div>
                 <div class="card"><div class="val">{win_rate:.0f}%</div><div>Win Rate</div></div>
             </div>
-            {'<img src="'+equity_img+'" style="width:100%;border:1px solid #eee;border-radius:5px;margin-bottom:20px;">' if equity_img else ''}
+            <div style="background:#e3f2fd;padding:15px;border-radius:8px;text-align:center;margin-bottom:20px;border:1px solid #90caf9;">
+                <div style="font-size:14px;color:#1976d2;font-weight:bold;">当前状态: S{current_state_id} ({current_state_name})</div>
+            </div>
+            {('<img src="'+equity_img+'" style="width:100%;border:1px solid #eee;border-radius:5px;margin-bottom:20px;">' if equity_img else '')}
             <table>
-                <thead><tr><th>Time</th><th>Action</th><th>PnL</th><th>Trend</th><th>Exit</th></tr></thead>
+                <thead><tr><th>Time</th><th>Action</th><th>PnL</th><th>Trend</th><th>State</th><th>Exit</th></tr></thead>
                 <tbody>{rows}</tbody>
             </table>
         </body>
@@ -192,7 +207,15 @@ class ReportService:
 
     def generate_heartbeat_html(self, status):
         if not status: return "<html><body>No Data</body></html>"
+        
+        # 状态映射字典
+        state_names = {0: "大跌", 1: "弱跌", 2: "震荡", 3: "弱涨", 4: "大涨", 99: "初始"}
+        
         ts = datetime.fromtimestamp(status['timestamp']/1000).strftime('%Y-%m-%d %H:%M:%S')
+        
+        # 获取当前状态
+        current_state_id = status.get('cluster', 99)
+        current_state_name = state_names.get(current_state_id, "未知")
         
         return f"""
         <html>
@@ -202,6 +225,9 @@ class ReportService:
             <div style="background:#f8f9fa; padding: 20px; border-radius: 8px; border:1px solid #ddd; text-align:center;">
                 <div style="font-size:32px; font-weight:bold; color:#007bff">${status.get('balance',0):.2f}</div>
                 <div style="color:#666">Current Equity</div>
+            </div>
+            <div style="background:#e3f2fd;padding:15px;border-radius:8px;text-align:center;margin-top:20px;border:1px solid #90caf9;">
+                <div style="font-size:14px;color:#1976d2;font-weight:bold;">当前状态: S{current_state_id} ({current_state_name})</div>
             </div>
             <div style="margin-top:20px;">
                 <b>Status:</b> {status.get('regime','Unknown')}<br>
