@@ -1,15 +1,20 @@
 import numpy as np
 import pandas as pd
 import logging
-from river import compose, preprocessing, linear_model, optim, tree
+from river import compose, preprocessing, linear_model, optim, tree, ensemble
 
 from core.analysis.feature_engineering import FeatureEngineer
 
 
 class SRP_PAR_Ensemble:
     """
-    双核架构：SRP (Tree) + PAR (Logistic)
+    双核架构：Tree Ensemble + PAR (Logistic)
     采用 Soft Voting 机制
+    
+    修复:
+    - 使用集成树模型替代单棵树
+    - 修复Scaler泄漏问题
+    - 只训练有明确方向的样本(label != 0)
     """
 
     def __init__(self):
@@ -25,18 +30,20 @@ class SRP_PAR_Ensemble:
 
         # 用于特征缩放的全局 Scaler，确保两个模型输入一致
         self.scaler = preprocessing.StandardScaler()
+        self.scaler_fitted = False  # 标记scaler是否已初始化
 
     def _init_models(self):
-        # 1. SRP - Hoeffding Tree (适合非线性关系)
-        self.model_srp = tree.HoeffdingTreeClassifier(
-            grace_period=100,  # 增加宽限期，让树更成熟再分裂
-            delta=1e-5,
+        # 1. Tree Ensemble - Adaptive Random Forest (集成树模型,更稳定)
+        self.model_tree = ensemble.AdaptiveRandomForestClassifier(
+            n_models=5,  # 5棵树的集成
             max_depth=10,
-            split_criterion="info_gain"
+            grace_period=100,
+            delta=1e-5,
+            leaf_prediction='nba',  # Naive Bayes Adaptive
+            split_criterion='info_gain'
         )
 
-        # 2. PAR - Logistic Regression (适合线性关系，模拟PAR的分类行为)
-        # 使用 SGD 优化器的逻辑回归，这也是一种在线学习模型
+        # 2. PAR - Logistic Regression (线性模型,捕捉线性关系)
         self.model_par = linear_model.LogisticRegression(
             optimizer=optim.SGD(lr=0.01)
         )
@@ -86,19 +93,22 @@ class SRP_PAR_Ensemble:
         else:
             return 0, 0.0
 
-        # 2. 在线缩放 (Learn scale but don't learn model)
-        self.scaler.learn_one(x)
-        x_scaled = self.scaler.transform_one(x)
+        # 2. 特征缩放 (只transform,不learn - 修复Scaler泄漏)
+        if self.scaler_fitted:
+            x_scaled = self.scaler.transform_one(x)
+        else:
+            # 首次预测时使用原始特征(scaler尚未训练)
+            x_scaled = x
 
         # 3. 获取概率 (Soft Voting)
-        # SRP 概率
-        srp_probs = self.model_srp.predict_proba_one(x_scaled)
+        # Tree Ensemble 概率
+        tree_probs = self.model_tree.predict_proba_one(x_scaled)
         # PAR 概率
         par_probs = self.model_par.predict_proba_one(x_scaled)
 
         # 提取上涨(1)和下跌(-1)的概率，如果键不存在则为0
-        p_up = (srp_probs.get(1, 0.0) + par_probs.get(1, 0.0)) / 2
-        p_down = (srp_probs.get(-1, 0.0) + par_probs.get(-1, 0.0)) / 2
+        p_up = (tree_probs.get(1, 0.0) + par_probs.get(1, 0.0)) / 2
+        p_down = (tree_probs.get(-1, 0.0) + par_probs.get(-1, 0.0)) / 2
 
         # 4. 计算最终得分 (-1 到 1)
         final_score = p_up - p_down
@@ -137,30 +147,27 @@ class SRP_PAR_Ensemble:
             elif price_diff_pct < -FIXED_THRESHOLD:
                 label = -1
 
-            # 2. 准备训练数据
-            # 必须使用上一个时间步的特征来预测当前的价格变化
-            features = self.training_features_buffer
-            x = {}
-            if isinstance(features, dict):
-                x = {k: self._sanitize_value(v) for k, v in features.items()}
-            elif isinstance(features, np.ndarray):
-                sanitized = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
-                x = {f"f{i}": v for i, v in enumerate(sanitized.flatten())}
-
-            # 3. 缩放 (Scaler 已经在 predict 时 update 过了，这里直接 transform)
-            x_scaled = self.scaler.transform_one(x)
-
-            # 4. 训练模型
-            # 无论 label 是什么，SRP 都要学 (因为树需要学习什么是不动)
-            self.model_srp.learn_one(x_scaled, label)
-
-            # PAR (线性模型) 对 0 label 学习可能会导致权重衰减过快趋向于0
-            # 策略：如果为了捕捉大行情，可以只在有显著涨跌时训练 PAR，或者赋予 0 样本较小的权重
-            # 这里简单处理：全量学习
-            self.model_par.learn_one(x_scaled, label)
-
-            self.train_count += 1
+            # 2. 只训练有明确方向的样本 (修复0 label语义污染和PAR被拖死问题)
             if label != 0:
+                # 准备训练数据
+                features = self.training_features_buffer
+                x = {}
+                if isinstance(features, dict):
+                    x = {k: self._sanitize_value(v) for k, v in features.items()}
+                elif isinstance(features, np.ndarray):
+                    sanitized = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+                    x = {f"f{i}": v for i, v in enumerate(sanitized.flatten())}
+
+                # 3. 在训练时更新Scaler (修复Scaler泄漏问题)
+                self.scaler.learn_one(x)
+                self.scaler_fitted = True
+                x_scaled = self.scaler.transform_one(x)
+
+                # 4. 训练模型
+                self.model_tree.learn_one(x_scaled, label)
+                self.model_par.learn_one(x_scaled, label)
+
+                self.train_count += 1
                 print(f"[AI Learn] 波动:{price_diff_pct:.2%} | Label:{label} | 样本数:{self.train_count}")
 
         # 更新 Buffer
