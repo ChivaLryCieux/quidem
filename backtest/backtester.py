@@ -386,18 +386,13 @@ class StrategyBacktesterUnified:
             if i % 10000 == 0:
                 print(f"进度: {i}/{total_steps} ({(i/total_steps)*100:.1f}%) | 余额: {self.balance:.2f} | 交易: {len(self.trades)}")
 
-            # 15m：用已完成的 15m K 线更新特征并训练；只处理时间不晚于当前 1m 的 15m K
+            # 15m：用已完成的 15m K 线更新特征；只处理时间不晚于当前 1m 的 15m K
             while idx_15 < len(data_15m) and data_15m[idx_15][0] <= c1[0]:
                 c15 = data_15m[idx_15]
                 
                 self.brain.ingest_candle(c15, '15m')
                 
                 res15 = self.brain.analyze()
-                
-                # 使用 on_candle_close 进行在线训练
-                if res15:
-                    close_price = float(c15[4])
-                    self.brain.on_candle_close(res15, close_price)
                 
                 # 15分钟K线收盘时检查开仓机会
                 if self.position['size'] == 0 and res15 and not self.risk.is_in_cooldown(now_ms=int(c15[0])):

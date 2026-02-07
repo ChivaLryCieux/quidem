@@ -11,7 +11,7 @@ import logging
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(root)
 
-from core.services.reporting import ReportService
+from core.utils.reporting import ReportService
 from core.config.settings import Config
 
 # Configurations (Should ideally be in Config, but kept here for now as in original)

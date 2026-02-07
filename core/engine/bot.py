@@ -133,15 +133,9 @@ class QuantBot:
             candles_15m = data.get('15m', [])
 
             if candles_1m and candles_15m:
-                # Process 1m (Legacy Training Logic preserved)
+                # Process 1m
                 for candle in candles_1m:
                     self.brain.ingest_candle(candle, '1m')
-                    res = self.brain.analyze()
-                    if res:
-                        # Simple diff label
-                        diff = float(candle[4]) - float(candle[1])
-                        label = 1 if diff > Config.MIN_TP_DISTANCE * 0.2 else (-1 if diff < -Config.MIN_TP_DISTANCE * 0.2 else 0)
-                        self.brain.train_ai(res['features'], label)
 
                 # Process 15m
                 for candle in candles_15m:
@@ -174,14 +168,9 @@ class QuantBot:
             obi, _ = self.brain.state_machine.ob_analyzer.analyze(book)
 
         # 4. Ingest to Brain
-        # Logic Change: Ensure timestamps are handled correctly before ingestion if needed
-        # But here we stick to original flow: Ingest -> Check Close -> Train
-        
         # Candle Close Check (Time Jump)
         if self.current_candle_timestamp != 0 and timestamp > self.current_candle_timestamp:
-            if self.last_tick_analysis:
-                logger.info(f"[Candle Close] {self.current_candle_timestamp} -> {timestamp}")
-                self.brain.on_candle_close(self.last_tick_analysis, self.last_tick_price)
+            logger.info(f"[Candle Close] {self.current_candle_timestamp} -> {timestamp}")
             self.current_candle_timestamp = timestamp
 
         self.brain.ingest_candle(c_15m, '15m', btc_change_pct=btc_chg, obi_value=obi)
@@ -208,18 +197,13 @@ class QuantBot:
         unrealized = (price - pos['entry_price']) * pos['size'] if pos['size'] != 0 else 0
         
         # Safely get properties
-        # Note: Analysis keys changed likely in feature engineer? 
-        # FeatureEngineer context returns 'ai_prediction' key? No, Brain adds it.
-        # Check Brain.analyze return.
-        
-        conf = analysis.get('ai_prediction', (0, 0.0))[1] if analysis else 0.0
         cluster = analysis.get('cluster', (99, 0.0))[0] if analysis else 99
         obi = analysis.get('obi', 0.0) if analysis else 0.0
         hf = analysis.get('hf_signal', 0.0) if analysis else 0.0
 
         self.ui.update_status(
             pos['size'], self.brain.state, self.brain.color,
-            obi, unrealized, price, hf, conf, cluster
+            obi, unrealized, price, hf, 0.0, cluster
         )
 
     def _send_heartbeat(self, price, analysis):
@@ -231,7 +215,6 @@ class QuantBot:
                 "position_size": self.trader.position['size'],
                 "price": price,
                 "regime": self.brain.state,
-                "ai_conf": analysis.get('ai_prediction', (0, 0.0))[1] if analysis else 0.0,
                 "cluster": analysis.get('cluster', (99, 0.0))[0] if analysis else 99,
                 "hf_signal": analysis.get('hf_signal', 0.0) if analysis else 0.0
             }

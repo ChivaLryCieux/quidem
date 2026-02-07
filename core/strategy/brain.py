@@ -3,10 +3,10 @@ import pandas as pd
 import logging
 from colorama import Fore, Style
 
-from core.models.online_models import SRP_PAR_Ensemble
 from core.models.hmm_engine import HMMStateEngine
 from core.strategy.analyzers import OrderBookAnalyzer, StateMachine
 from core.strategy.signals import SignalGenerator
+from core.analysis.feature_engineering import FeatureEngineer
 
 logger = logging.getLogger(__name__)
 
@@ -16,18 +16,40 @@ logger = logging.getLogger(__name__)
 # ==========================================
 class StrategyBrain:
     def __init__(self):
-        self.rf_classifier = SRP_PAR_Ensemble()
+        self.feature_engineer = FeatureEngineer()
         self.state_machine = StateMachine()
         self.hmm_engine = HMMStateEngine()
         self.signal_generator = SignalGenerator()
         self.state = self.state_machine.state
         self.color = self.state_machine.color
+        
+        # K线历史数据
+        self.history = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'taker_buy'])
+        self.cached_analysis_data = None
 
     def ingest_candle(self, item, timeframe='1m', btc_change_pct=0.0, obi_value=0.0):
-        self.rf_classifier.ingest_candle(item, timeframe, btc_change_pct, obi_value)
+        """接收K线数据并计算特征"""
+        if timeframe == '15m':
+            if len(item) == 6:
+                item.append(item[5] * 0.5)
+            timestamp, open_, high, low, close, vol, taker_buy_vol = item
+            new_row = pd.DataFrame([[timestamp, open_, high, low, close, vol, taker_buy_vol]],
+                                   columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'taker_buy'])
+
+            if self.history.empty:
+                self.history = new_row
+            else:
+                self.history = pd.concat([self.history, new_row]).iloc[-500:]
+
+            # 计算特征
+            features, context = self.feature_engineer.calculate_features(
+                self.history, close, btc_change_pct, obi_value
+            )
+            self.cached_analysis_data = context
 
     def analyze(self, orderbook=None):
-        feature_data = self.rf_classifier.extract_features()
+        """分析市场状态"""
+        feature_data = self.cached_analysis_data
         if not feature_data:
             return None
 
@@ -36,52 +58,25 @@ class StrategyBrain:
         feature_data['obi'] = obi
         feature_data['spread_pct'] = spread_pct
 
-        self.state, self.color = self.state_machine.determine_regime(
-            feature_data['range_pct'],
-            feature_data['vol_explosion']
-        )
-
-        ai_dir, ai_conf = self.rf_classifier.predict(feature_data['features'])
-        feature_data['ai_prediction'] = (ai_dir, ai_conf)
-
+        # 使用HMM状态预测
         state_id, state_confidence = self.hmm_engine.predict_state(
             feature_data.get('momentum_values'),
             feature_data.get('volatility_values')
         )
         feature_data['cluster'] = (state_id, state_confidence)
 
-        return feature_data
+        # 根据HMM状态设置显示状态和颜色
+        state_map = {
+            0: ("📉 大跌", Fore.RED),
+            1: ("📉 弱跌", Fore.LIGHTRED_EX),
+            2: ("🦀 震荡", Fore.YELLOW),
+            3: ("📈 弱涨", Fore.LIGHTGREEN_EX),
+            4: ("📈 大涨", Fore.GREEN),
+            99: ("⏳ 初始", Fore.WHITE)
+        }
+        self.state, self.color = state_map.get(state_id, ("❓ 未知", Fore.WHITE))
 
-    def train_ai(self, features, label):
-        # 兼容旧接口，虽然 on_candle_close 更好
-        # 将 numpy 展平转 dict，确保没有 None 值
-        sanitized_features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
-        feature_values = []
-        for i, v in enumerate(sanitized_features.flatten()):
-            feature_values.append(v)
-        x = {f"f{i}": v for i, v in enumerate(feature_values)}
-        
-        # SRP + PAR + EWA 训练
-        self.rf_classifier.classifier_srp.learn_one(x, label)
-        if label != 0:
-            self.rf_classifier.classifier_par.learn_one(x, label)
-            
-        # EWA 回归训练
-        # 简单使用平均值作为特征，这与 models.py 中的逻辑保持一致
-        avg_feat = sum(feature_values) / len(feature_values)
-        if np.isnan(avg_feat) or np.isinf(avg_feat):
-            avg_feat = 0.0
-            
-        reg_features = {'input': avg_feat}
-        # 将分类标签转换为回归目标 (-1.0, 0.0, 1.0)
-        self.rf_classifier.ewa_ensemble.learn_one(reg_features, float(label))
+        return feature_data
 
     def get_entry_signal(self, analysis_data, current_price):
         return self.state_machine.get_entry_signal(analysis_data, current_price)
-
-    def on_candle_close(self, final_analysis_of_closed_candle, close_price):
-        if final_analysis_of_closed_candle and 'features' in final_analysis_of_closed_candle:
-            self.rf_classifier.on_candle_close(
-                final_analysis_of_closed_candle,
-                close_price
-            )
