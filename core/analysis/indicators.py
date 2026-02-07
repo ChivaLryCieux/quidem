@@ -1,15 +1,9 @@
-"""
-Raw indicators and calculators using only numpy/pandas.
-Contains classes that use numpy and pandas but not advanced libraries like scipy or pywt.
-"""
 import math
 import numpy as np
 import pandas as pd
 
 
 class MathUtils:
-    """Technical indicator calculations using pandas."""
-
     @staticmethod
     def calc_atr(df, period=14):
         """Calculate Average True Range."""
@@ -35,8 +29,6 @@ class MathUtils:
 
 
 class MomentumCalculator:
-    """Calculate momentum indicators across multiple time periods."""
-    
     def __init__(self, periods=[1, 5, 15, 30, 50, 96]):
         self.periods = periods
         self.history = []
@@ -67,8 +59,6 @@ class MomentumCalculator:
 
 
 class RollingVolatilityCalculator:
-    """Calculate rolling volatility across multiple time windows."""
-
     def __init__(self, periods=[5, 10, 25, 50]):
         self.periods = periods
 
@@ -127,53 +117,3 @@ class RollingVolatilityCalculator:
                 vol_values[f"T_{T}"] = 0.0
 
         return vol_values
-
-
-class OnlineEGARCH:
-    """Online EGARCH volatility estimator."""
-    
-    def __init__(self, decay=0.9, alpha=0.1, theta=-0.05):
-        self.decay = decay
-        self.alpha = alpha
-        self.theta = theta
-        self.log_var = 0.0
-        self.initialized = False
-
-    def update(self, ret):
-        """Update volatility estimate with new return."""
-        if not self.initialized:
-            self.log_var = np.log(ret ** 2 + 1e-9)
-            self.initialized = True
-            return abs(ret)
-        
-        prev_vol = math.sqrt(math.exp(self.log_var))
-        std_resid = ret / (prev_vol + 1e-9)
-        new_log = (self.decay * self.log_var + 
-                   (self.alpha * (abs(std_resid) - 0.7979) + self.theta * std_resid))
-        self.log_var = max(min(new_log, 5.0), -10.0)
-        return math.sqrt(math.exp(self.log_var))
-
-
-class FractalAnalysis:
-    """Hurst exponent estimation using rescaled range analysis."""
-    
-    def __init__(self, window_size=30):
-        self.window = window_size
-        self.data_buffer = []
-
-    def update(self, price):
-        """Update with new price and calculate Hurst exponent."""
-        self.data_buffer.append(price)
-        if len(self.data_buffer) > self.window:
-            self.data_buffer.pop(0)
-        if len(self.data_buffer) < self.window:
-            return 0.5
-        
-        rets = np.diff(np.log(np.array(self.data_buffer)))
-        if len(rets) < 2 or np.std(rets) == 0:
-            return 0.5
-        
-        rs = ((np.max(np.cumsum(rets - np.mean(rets))) - 
-               np.min(np.cumsum(rets - np.mean(rets)))) / 
-              (np.std(rets) + 1e-9))
-        return max(0.0, min(1.0, np.log(rs) / np.log(len(rets))))

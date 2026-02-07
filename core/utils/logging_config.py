@@ -1,6 +1,20 @@
-import logging
-import logging.handlers
+"""
+日志配置模块 - 配置全局日志系统
+"""
 import os
+import sys
+import logging
+from logging.handlers import RotatingFileHandler
+from colorama import Fore, Style, init
+
+# ============================================
+# 🔥 关键修复：禁用Python输出缓冲
+# ============================================
+# 这对于PyCharm等IDE中的实时日志输出至关重要
+os.environ['PYTHONUNBUFFERED'] = '1'
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
 from pathlib import Path
 from typing import Optional
 

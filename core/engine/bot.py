@@ -128,25 +128,52 @@ class QuantBot:
     def _warmup_models(self):
         self.ui.log_msg("Warming up models...", "info")
         try:
-            data = self.exchange.fetch_initial_history(limit=100)
+            # 添加进度提示
+            self.ui.log_msg("Fetching historical data from exchange...", "info")
+            
+            # 使用线程和超时机制
+            import concurrent.futures
+            
+            def fetch_with_timeout():
+                return self.exchange.fetch_initial_history(limit=100)
+            
+            # 设置30秒超时
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(fetch_with_timeout)
+                try:
+                    data = future.result(timeout=30)
+                except concurrent.futures.TimeoutError:
+                    self.ui.log_msg("⚠️ Warmup timeout (30s). Network may be slow. Continuing with empty data...", "warning")
+                    data = {'1m': [], '15m': []}
+            
             candles_1m = data.get('1m', [])
             candles_15m = data.get('15m', [])
 
             if candles_1m and candles_15m:
+                self.ui.log_msg(f"Processing {len(candles_1m)} 1m candles...", "info")
                 # Process 1m
-                for candle in candles_1m:
+                for i, candle in enumerate(candles_1m):
                     self.brain.ingest_candle(candle, '1m')
+                    # 每20根K线显示一次进度
+                    if (i + 1) % 20 == 0:
+                        self.ui.log_msg(f"  Processed {i + 1}/{len(candles_1m)} 1m candles", "info")
 
+                self.ui.log_msg(f"Processing {len(candles_15m)} 15m candles...", "info")
                 # Process 15m
-                for candle in candles_15m:
+                for i, candle in enumerate(candles_15m):
                     self.brain.ingest_candle(candle, '15m')
+                    # 每10根K线显示一次进度
+                    if (i + 1) % 10 == 0:
+                        self.ui.log_msg(f"  Processed {i + 1}/{len(candles_15m)} 15m candles", "info")
 
                 self.current_candle_timestamp = candles_1m[-1][0]
-                self.ui.log_msg("Warmup Complete", "success")
+                self.ui.log_msg("✅ Warmup Complete", "success")
             else:
-                self.ui.log_msg("Warmup Data Empty", "error")
+                self.ui.log_msg("⚠️ Warmup Data Empty - Starting with minimal state", "warning")
         except Exception as e:
-            self.ui.log_msg(f"Warmup Error: {e}", "error")
+            self.ui.log_msg(f"❌ Warmup Error: {e}", "error")
+            import traceback
+            logger.error(f"Warmup traceback: {traceback.format_exc()}")
 
     def _tick(self):
         # 1. Get Data
@@ -196,15 +223,14 @@ class QuantBot:
         pos = self.trader.position
         unrealized = (price - pos['entry_price']) * pos['size'] if pos['size'] != 0 else 0
         
-        # Safely get properties
-        cluster = analysis.get('cluster', (99, 0.0))[0] if analysis else 99
-        obi = analysis.get('obi', 0.0) if analysis else 0.0
-        hf = analysis.get('hf_signal', 0.0) if analysis else 0.0
-
-        self.ui.update_status(
-            pos['size'], self.brain.state, self.brain.color,
-            obi, unrealized, price, hf, 0.0, cluster
-        )
+        # Update UI
+        if analysis:
+            obi = analysis.get('obi', 0.0)
+            cluster = analysis.get('cluster', (99, 0.0))[0]
+            self.ui.update_status(
+                pos['size'], self.brain.state, self.brain.color,
+                obi, unrealized, price, cluster
+            )
 
     def _send_heartbeat(self, price, analysis):
         if not (Config.ENABLE_MAIL_REPORT and self.redis_client): return

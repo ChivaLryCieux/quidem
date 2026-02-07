@@ -82,7 +82,7 @@ class DisplayManager:
         )
         print(display_str)
 
-    def update_status(self, pos, regime, color, obi, pnl, price, hf_signal, ai_conf, cluster_id=5):
+    def update_status(self, pos, regime, color, obi, pnl, price, cluster_id=5):
         """
         实时刷新状态栏
         注意：尽量使用定宽格式化 (e.g. :<10, :.4f) 防止字符串长度抖动
@@ -106,8 +106,6 @@ class DisplayManager:
             f"{color}{regime:<8}{Style.RESET_ALL} | "
             f"OBI:{obi:>+5.2f} | "  # 强制显示符号，宽度5
             f"P:{price:<8.4f} | "  # 左对齐，保留4位小数
-            f"HF:{hf_signal:>+6.3f} | "  # H-infinity 信号
-            f"AI:{ai_conf:>4.2f} | "  # AI 置信度
             f"S{cluster_id}({state_name}) | "  # 状态ID + 名称
             f"{pnl_c}${pnl:>+7.2f}{Style.RESET_ALL}"  # PnL 右对齐
         )

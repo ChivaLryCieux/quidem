@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import json
 import threading
@@ -180,27 +181,54 @@ class ExchangeService:
 
     def connect(self):
         try:
+            logger.info("="*50)
             logger.info("Initializing REST API connection...")
+            sys.stdout.flush()
+            
             self.client.load_markets()
+            logger.info("✅ REST API connected successfully")
+            sys.stdout.flush()
 
             # 启动 WebSocket 线程
+            logger.info("Starting WebSocket thread...")
+            sys.stdout.flush()
+            
             self.ws_streamer.start()
+            logger.info("✅ WebSocket thread started")
             logger.info("Waiting for WS data stream...")
+            sys.stdout.flush()
 
             # 等待 WebSocket 预热
             timeout = 0
+            max_timeout = 30  # 最大等待30秒
+            
             while not self.ws_streamer.data['is_ready']:
                 time.sleep(1)
                 timeout += 1
-                if timeout > 30:  # 增加超时宽容度
-                    return False, "WS Connection Timeout (Check Proxy/Network)"
+                
+                # 每秒打印进度
+                logger.info(f"  Waiting for WS data... {timeout}s / {max_timeout}s")
+                sys.stdout.flush()
+                
+                if timeout > max_timeout:
+                    logger.error(f"❌ WS Connection Timeout ({max_timeout}s)")
+                    logger.error("Please check:")
+                    logger.error("  1. Proxy is running (port 7890)")
+                    logger.error("  2. Network connection")
+                    logger.error("  3. Firewall settings")
+                    sys.stdout.flush()
+                    return False, f"WS Connection Timeout ({max_timeout}s) - Check Proxy/Network"
 
-                # 每5秒打印一次进度
-                if timeout % 5 == 0:
-                    logger.info(f"Waiting for WS... {timeout}s")
-
+            logger.info("✅ WebSocket data stream ready")
+            logger.info("="*50)
+            sys.stdout.flush()
             return True, "Connected & WS Stream Ready"
+            
         except Exception as e:
+            logger.error(f"❌ Connection Failed: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            sys.stdout.flush()
             return False, f"Connection Failed: {str(e)}"
 
     def fetch_initial_history(self, limit=100):

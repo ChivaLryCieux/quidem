@@ -1,7 +1,7 @@
 
 import numpy as np
 import pandas as pd
-from core.analysis.raw_indicators import (
+from core.analysis.indicators import (
     MomentumCalculator, RollingVolatilityCalculator, MathUtils
 )
 
