@@ -5,7 +5,6 @@ from colorama import Fore, Style
 
 from core.models.hmm_engine import HMMStateEngine
 from core.strategy.analyzers import OrderBookAnalyzer, StateMachine
-from core.strategy.signals import SignalGenerator
 from core.analysis.feature_engineering import FeatureEngineer
 
 logger = logging.getLogger(__name__)
@@ -19,7 +18,6 @@ class StrategyBrain:
         self.feature_engineer = FeatureEngineer()
         self.state_machine = StateMachine()
         self.hmm_engine = HMMStateEngine()
-        self.signal_generator = SignalGenerator()
         self.state = self.state_machine.state
         self.color = self.state_machine.color
         
