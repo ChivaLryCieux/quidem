@@ -18,14 +18,17 @@ class Config:
     API_SECRET = os.getenv("BINANCE_SECRET")
 
     # 交易标的与参数
-    SYMBOL = 'XRP/USDT'
-    SYMBOL_WS = 'xrpusdt'  # WebSocket用的全小写无斜杠名称
-    TIMEFRAME = '15m'  # 统一使用15分钟K线进行特征计算和模型预测
+    SYMBOL = 'SOL/USDT'
+    SYMBOL_WS = 'solusdt'  # WebSocket用的全小写无斜杠名称
+    TIMEFRAME_SIGNAL = '5m'   # 信号生成和交易执行周期
+    TIMEFRAME_TREND = '15m'   # 大趋势过滤周期
+    TIMEFRAME = '5m'          # 主周期，兼容旧代码
 
     # 资金管理
     MIN_LEVERAGE = 5.0
-    MAX_LEVERAGE = 5.0
-    RISK_APPETITE = 0.03
+    MAX_LEVERAGE = 20.0       # 杠杆范围 5x-30x，默认20x
+    DEFAULT_LEVERAGE = 20.0
+    RISK_APPETITE = 0.05      # 目标单笔净利 5%
     TAKER_FEE_RATE = 0.0005
 
     MAX_FUNDING_RATE_THRESHOLD = 0.0005
@@ -34,16 +37,18 @@ class Config:
     BAILOUT_ON_NTH_FLIP = 5
     FEE_BUFFER_PCT = 0.0012
     MIN_ATR_PCT = 0.0020
-    MIN_TP_DISTANCE = 0.003
+    MIN_TP_DISTANCE = 0.005   # 止盈目标：0.5%价格波动 (约8%本金盈利)
+    MAX_SL_DISTANCE = 0.0025  # 硬止损：0.25%价格反向波动 (约4%本金亏损)
+    # 盈亏比 2:1，即使50%胜率也能盈利
 
     # 微观结构
     OBI_THRESHOLD_TREND = -0.2
     OBI_THRESHOLD_BREAKOUT = 0.1
     MAX_SPREAD_PCT = 0.001
-    LABEL_ATR_MULT = 0.5  # 训练与标签阈值：ATR倍数，用于决定涨跌标签门槛
-    BACKTEST_MODE = True  # 回测模式开关：True 时跳过依赖订单簿的过滤（避免OBI真空抑制信号）
-    FUNDING_EVENT_INTERVAL_HOURS = 8  # 资金费率结算间隔（小时），回测按此周期触发结算事件
-    BACKTEST_FUNDING_RATE_PCT = 0.0000  # 回测资金费率（百分比），正数对多仓扣费、对空仓加费；负数相反
+    LABEL_ATR_MULT = 0.5
+    BACKTEST_MODE = True
+    FUNDING_EVENT_INTERVAL_HOURS = 8
+    BACKTEST_FUNDING_RATE_PCT = 0.0000
 
     #邮件报告开关
     ENABLE_MAIL_REPORT = False

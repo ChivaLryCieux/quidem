@@ -128,45 +128,38 @@ class QuantBot:
     def _warmup_models(self):
         self.ui.log_msg("Warming up models...", "info")
         try:
-            # 添加进度提示
             self.ui.log_msg("Fetching historical data from exchange...", "info")
             
-            # 使用线程和超时机制
             import concurrent.futures
             
             def fetch_with_timeout():
                 return self.exchange.fetch_initial_history(limit=100)
             
-            # 设置30秒超时
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(fetch_with_timeout)
                 try:
                     data = future.result(timeout=30)
                 except concurrent.futures.TimeoutError:
-                    self.ui.log_msg("⚠️ Warmup timeout (30s). Network may be slow. Continuing with empty data...", "warning")
-                    data = {'1m': [], '15m': []}
+                    self.ui.log_msg("⚠️ Warmup timeout (30s). Continuing with empty data...", "warning")
+                    data = {'5m': [], '15m': []}
             
-            candles_1m = data.get('1m', [])
+            candles_5m = data.get('5m', [])
             candles_15m = data.get('15m', [])
 
-            if candles_1m and candles_15m:
-                self.ui.log_msg(f"Processing {len(candles_1m)} 1m candles...", "info")
-                # Process 1m
-                for i, candle in enumerate(candles_1m):
-                    self.brain.ingest_candle(candle, '1m')
-                    # 每20根K线显示一次进度
+            if candles_5m and candles_15m:
+                self.ui.log_msg(f"Processing {len(candles_5m)} 5m candles...", "info")
+                for i, candle in enumerate(candles_5m):
+                    self.brain.ingest_candle(candle, '5m')
                     if (i + 1) % 20 == 0:
-                        self.ui.log_msg(f"  Processed {i + 1}/{len(candles_1m)} 1m candles", "info")
+                        self.ui.log_msg(f"  Processed {i + 1}/{len(candles_5m)} 5m candles", "info")
 
                 self.ui.log_msg(f"Processing {len(candles_15m)} 15m candles...", "info")
-                # Process 15m
                 for i, candle in enumerate(candles_15m):
                     self.brain.ingest_candle(candle, '15m')
-                    # 每10根K线显示一次进度
                     if (i + 1) % 10 == 0:
                         self.ui.log_msg(f"  Processed {i + 1}/{len(candles_15m)} 15m candles", "info")
 
-                self.current_candle_timestamp = candles_1m[-1][0]
+                self.current_candle_timestamp = candles_5m[-1][0]
                 self.ui.log_msg("✅ Warmup Complete", "success")
             else:
                 self.ui.log_msg("⚠️ Warmup Data Empty - Starting with minimal state", "warning")
@@ -176,12 +169,12 @@ class QuantBot:
             logger.error(f"Warmup traceback: {traceback.format_exc()}")
 
     def _tick(self):
-        # 1. Get Data
-        c_1m, c_15m, book, fr, btc_price = self.exchange.get_latest_data()
-        if not c_15m: return
+        # 1. Get Data (5m + 15m)
+        c_5m, c_15m, book, fr, btc_price = self.exchange.get_latest_data()
+        if not c_5m: return
 
-        timestamp = c_15m[0]
-        curr_price = float(c_15m[4])
+        timestamp = c_5m[0]
+        curr_price = float(c_5m[4])
         self.last_tick_price = curr_price
 
         # 2. BTC Correlation
@@ -194,14 +187,17 @@ class QuantBot:
         if book:
             obi, _ = self.brain.state_machine.ob_analyzer.analyze(book)
 
-        # 4. Ingest to Brain
-        # Candle Close Check (Time Jump)
+        # 4. Ingest to Brain (5m for signals, 15m for trend filter)
         if self.current_candle_timestamp != 0 and timestamp > self.current_candle_timestamp:
             logger.info(f"[Candle Close] {self.current_candle_timestamp} -> {timestamp}")
             self.current_candle_timestamp = timestamp
 
-        self.brain.ingest_candle(c_15m, '15m', btc_change_pct=btc_chg, obi_value=obi)
-        if c_1m: self.brain.ingest_candle(c_1m, '1m', btc_change_pct=btc_chg, obi_value=obi)
+        # Ingest 15m for trend filtering
+        if c_15m:
+            self.brain.ingest_candle(c_15m, '15m', btc_change_pct=btc_chg, obi_value=obi)
+        
+        # Ingest 5m for signal generation
+        self.brain.ingest_candle(c_5m, '5m', btc_change_pct=btc_chg, obi_value=obi)
 
         # 5. Analyze
         analysis = self.brain.analyze(book) if book else None

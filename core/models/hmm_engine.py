@@ -1,5 +1,16 @@
+"""
+GMM-HMM 推理引擎
+
+负责加载训练好的 HMM 模型并进行实时状态预测。
+5个状态定义：
+  State 0: 大跌 (Huge Drop) - 极负动量，高波动，高量
+  State 1: 小跌 (Small Drop) - 弱负动量，低波动
+  State 2: 震荡 (Volatility) - 动量接近0，均值回归特性强
+  State 3: 小涨 (Small Rise) - 弱正动量，低波动
+  State 4: 大涨 (Huge Rise) - 极正动量，高波动，高量
+"""
+
 import numpy as np
-import pandas as pd
 import os
 import sys
 import logging
@@ -19,30 +30,40 @@ class HMMStateEngine:
         初始化 HMM 引擎，加载训练好的模型
         
         Args:
-            model_path: 模型文件路径，默认为 core/xrp_hmm_latest.pkl
+            model_path: 模型文件路径，默认为 core/sol_hmm_latest.pkl
         """
         # 默认模型路径
         if model_path is None:
             model_path = os.path.join(
                 os.path.dirname(os.path.dirname(__file__)), 
-                'xrp_hmm_latest.pkl'
+                'sol_hmm_latest.pkl'
             )
         
         # 检查文件是否存在
         if not os.path.exists(model_path):
-            logger.error(f"❌ HMM 模型文件未找到: {model_path}")
-            sys.exit(1)
+            # 尝试旧的 xrp 模型路径作为后备
+            old_path = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), 
+                'xrp_hmm_latest.pkl'
+            )
+            if os.path.exists(old_path):
+                logger.warning(f"⚠️ 未找到 SOL 模型，使用旧模型: {old_path}")
+                model_path = old_path
+            else:
+                logger.error(f"❌ HMM 模型文件未找到: {model_path}")
+                self._init_fallback()
+                return
         
         try:
-            # 加载模型包（只加载一次）
+            # 加载模型包
             logger.info(f"正在加载 HMM 模型: {model_path}")
             model_bundle = joblib.load(model_path)
             
             # 提取模型组件
-            self.model = model_bundle['model']  # GMMHMM 对象
-            self.scaler = model_bundle['scaler']  # StandardScaler 对象
-            self.state_map = model_bundle['state_map']  # 状态映射字典
-            self.feature_cols = model_bundle['feature_cols']  # 特征列名列表
+            self.model = model_bundle['model']
+            self.scaler = model_bundle['scaler']
+            self.state_map = model_bundle['state_map']
+            self.feature_cols = model_bundle['feature_cols']
             self.n_clusters = model_bundle.get('n_clusters', 5)
             
             logger.info(f"✅ HMM 模型加载成功")
@@ -50,81 +71,81 @@ class HMMStateEngine:
             logger.info(f"   - 特征维度: {len(self.feature_cols)}")
             logger.info(f"   - 状态映射: {self.state_map}")
             
+            self.model_loaded = True
+            
         except Exception as e:
             logger.error(f"❌ HMM 模型加载失败: {e}")
-            sys.exit(1)
-        
-        # 训练时使用的窗口（必须与训练代码一致）
-        self.windows = [1, 5, 15, 30, 50, 96]
+            self._init_fallback()
         
         # 状态追踪
         self.is_initialized = False
-        self.last_valid_state = 99  # 初始状态为 99
-        
-        # 最小数据长度（需要足够的历史数据来计算 rolling(96)）
-        self.min_data_length = max(self.windows) + 10  # 96 + 10 = 106
+        self.last_valid_state = 99
     
-    def predict_state(self, momentum_values, volatility_values):
+    def _init_fallback(self):
+        """初始化后备模式（无模型）"""
+        self.model = None
+        self.scaler = None
+        self.state_map = {}
+        self.feature_cols = []
+        self.n_clusters = 5
+        self.model_loaded = False
+        logger.warning("⚠️ HMM 引擎运行在后备模式，将返回默认状态")
+    
+    def predict_state(self, momentum_values=None, volatility_values=None, context=None):
         """
         预测当前市场状态
         
         Args:
-            momentum_values: 字典，格式 {'T_1': val, 'T_5': val, ...}
-            volatility_values: 字典，格式 {'T_1': val, 'T_5': val, ...}
+            momentum_values: 字典，格式 {'T_1': val, 'T_10': val, ...} (旧接口兼容)
+            volatility_values: 字典，格式 {'T_5': val, 'T_50': val, ...} (旧接口兼容)
+            context: 完整的特征上下文字典 (新接口)
         
         Returns:
             (state_id, confidence): 状态ID (0-4) 和置信度
         """
-        # 1. 数据验证
-        if not momentum_values or not volatility_values:
+        # 模型未加载，返回默认状态
+        if not self.model_loaded:
             return (self.last_valid_state, 0.0) if self.is_initialized else (99, 0.0)
         
-        # 2. 构建特征向量（必须与训练时的顺序完全一致）
-        features = []
+        # 使用新接口 (context)
+        if context is not None and 'hmm_features' in context:
+            return self._predict_from_features(context['hmm_features'])
         
-        # 2.1 添加对数动量特征（按窗口顺序）
-        for T in self.windows:
-            key = f"T_{T}"
-            val = momentum_values.get(key)
-            features.append(val if val is not None else 0.0)
+        # 使用旧接口 (momentum_values, volatility_values)
+        if momentum_values is not None and volatility_values is not None:
+            return self._predict_from_legacy(momentum_values, volatility_values, context)
         
-        # 2.2 添加波动率特征（只在大于1的窗口）
-        for T in self.windows:
-            if T > 1:
-                key = f"T_{T}"
-                val = volatility_values.get(key)
-                features.append(val if val is not None else 0.0)
+        return (self.last_valid_state, 0.0) if self.is_initialized else (99, 0.0)
+    
+    def _predict_from_features(self, hmm_features):
+        """从预计算的HMM特征向量预测状态"""
+        if hmm_features is None:
+            return (self.last_valid_state, 0.0) if self.is_initialized else (99, 0.0)
         
-        # 3. 转换为 numpy 数组
-        feature_vector = np.array(features).reshape(1, -1)
+        feature_vector = np.array(hmm_features).reshape(1, -1)
         
-        # 4. 检查是否全为零（无效数据）
+        # 检查是否全为零
         if np.all(feature_vector == 0):
             return (self.last_valid_state, 0.0) if self.is_initialized else (99, 0.0)
         
-        # 5. 数据清洗（防止 NaN 和 Inf）
+        # 数据清洗
         feature_vector = np.nan_to_num(feature_vector, nan=0.0, posinf=0.0, neginf=0.0)
         
         try:
-            # 6. 特征缩放（只使用 transform，不使用 fit_transform）
-            # 这是关键：防止未来函数！
+            # 特征缩放
             X_scaled = self.scaler.transform(feature_vector)
             
-            # 7. HMM 状态预测
-            # predict() 返回的是训练时的随机状态ID，需要通过 state_map 映射
+            # HMM 状态预测
             raw_state = self.model.predict(X_scaled)[0]
             
-            # 8. 映射到排序后的状态ID (0=大跌, 1=弱跌, 2=震荡, 3=弱涨, 4=大涨)
+            # 映射到排序后的状态ID
             sorted_state = self.state_map.get(raw_state, 99)
             
-            # 9. 计算置信度（使用状态概率）
-            # score() 返回对数似然，我们将其转换为置信度
+            # 计算置信度
             log_likelihood = self.model.score(X_scaled)
-            # 简单映射：将对数似然归一化到 [0, 1]
-            # 注意：这是一个简化的置信度估计
             confidence = min(1.0, max(0.0, np.exp(log_likelihood / 100)))
             
-            # 10. 更新状态追踪
+            # 更新状态追踪
             if sorted_state != 99:
                 self.is_initialized = True
                 self.last_valid_state = sorted_state
@@ -134,6 +155,45 @@ class HMMStateEngine:
         except Exception as e:
             logger.error(f"HMM 预测失败: {e}")
             return (self.last_valid_state, 0.0) if self.is_initialized else (99, 0.0)
+    
+    def _predict_from_legacy(self, momentum_values, volatility_values, context=None):
+        """从旧格式的动量和波动率值预测状态（兼容性）"""
+        # 尝试从 context 获取额外特征
+        if context is None:
+            context = {}
+        
+        # 构建特征向量 (12维)
+        features = []
+        
+        # 1. 相对成交量
+        features.append(context.get('relative_volume', 1.0))
+        
+        # 2. 对数动量 (1,10,50,96)
+        for T in [1, 10, 50, 96]:
+            key = f"T_{T}"
+            val = momentum_values.get(key, 0.0)
+            features.append(val if val is not None else 0.0)
+        
+        # 3. 滚动标准差 (5,50,96)
+        for T in [5, 50, 96]:
+            key = f"T_{T}"
+            val = volatility_values.get(key, 0.0)
+            features.append(val if val is not None else 0.0)
+        
+        # 4. 归一化MACD
+        features.append(context.get('macd_normalized', 0.0))
+        
+        # 5. 布林带距离
+        features.append(context.get('bb_distance', 0.0))
+        
+        # 6. SuperTrend方向
+        features.append(float(context.get('supertrend_direction', 0)))
+        
+        # 7. K-D差值
+        features.append(context.get('k_minus_d', 0.0))
+        
+        feature_vector = np.array(features).reshape(1, -1)
+        return self._predict_from_features(feature_vector)
     
     def get_state_name(self, state_id):
         """
@@ -146,11 +206,11 @@ class HMMStateEngine:
             状态名称字符串
         """
         state_names = {
-            0: "极度恐慌/大跌",
-            1: "阴跌/弱势",
-            2: "震荡/噪音",
-            3: "反弹/弱势上涨",
-            4: "主升浪/大涨",
+            0: "大跌",
+            1: "小跌",
+            2: "震荡",
+            3: "小涨",
+            4: "大涨",
             99: "初始化"
         }
         return state_names.get(state_id, f"未知状态({state_id})")

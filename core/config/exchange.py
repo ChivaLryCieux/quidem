@@ -22,7 +22,7 @@ class MarketDataStreamer(threading.Thread):
         symbol_lower = Config.SYMBOL_WS.lower()
         self.url = (
             f"wss://fstream.binance.com/stream?streams="
-            f"{symbol_lower}@kline_{Config.TIMEFRAME}/"
+            f"{symbol_lower}@kline_5m/"
             f"{symbol_lower}@kline_15m/"
             f"{symbol_lower}@depth20@100ms/"
             f"{symbol_lower}@markPrice/"
@@ -32,13 +32,15 @@ class MarketDataStreamer(threading.Thread):
         # 线程安全的数据存储
         self.lock = threading.Lock()
         self.data = {
-            'kline_1m': None,
+            'kline_5m': None,
             'kline_15m': None,
             'orderbook': None,
             'funding_rate': 0.0,
             'btc_price': 0.0,
             'is_ready': False
         }
+        self.running = True
+        self._last_update_time = time.time()
         self.running = True
         self._last_update_time = time.time()
 
@@ -100,8 +102,8 @@ class MarketDataStreamer(threading.Thread):
 
                 if 'btcusdt' in stream:
                     updates['btc_price'] = float(k['c'])
-                elif 'kline_1m' in stream:  # 依赖 stream name 包含 timeframe
-                    updates['kline_1m'] = kline_data
+                elif 'kline_5m' in stream:
+                    updates['kline_5m'] = kline_data
                 elif 'kline_15m' in stream:
                     updates['kline_15m'] = kline_data
 
@@ -123,7 +125,8 @@ class MarketDataStreamer(threading.Thread):
 
                 # 检查数据是否准备就绪
                 if not self.data['is_ready']:
-                    if (self.data['kline_15m'] is not None and
+                    if (self.data['kline_5m'] is not None and
+                            self.data['kline_15m'] is not None and
                             self.data['orderbook'] is not None):
                         self.data['is_ready'] = True
                         logger.info("Market Data Ready!")
@@ -234,31 +237,30 @@ class ExchangeService:
     def fetch_initial_history(self, limit=100):
         """只在启动时调用一次 REST API 获取历史 K 线"""
         try:
-            # 获取1分钟K线历史数据
-            ohlcv_1m = self.client.fetch_ohlcv(self.symbol, '1m', limit=limit)
+            # 获取5分钟K线历史数据
+            ohlcv_5m = self.client.fetch_ohlcv(self.symbol, '5m', limit=limit)
             # 获取15分钟K线历史数据
             ohlcv_15m = self.client.fetch_ohlcv(self.symbol, '15m', limit=limit)
-            return {'1m': ohlcv_1m, '15m': ohlcv_15m}
+            return {'5m': ohlcv_5m, '15m': ohlcv_15m}
         except Exception as e:
             logger.error(f"[History Fetch Error] {e}")
-            # [优化] 如果失败返回空列表，防止 NoneType 错误
-            return {'1m': [], '15m': []}
+            return {'5m': [], '15m': []}
 
     def get_latest_data(self):
         """
         从 WebSocket 本地缓存读取数据
-        返回: (最新1m K线列表, 最新15m K线列表, 订单簿, 资金费率, BTC价格)
+        返回: (最新5m K线列表, 最新15m K线列表, 订单簿, 资金费率, BTC价格)
         """
         data = self.ws_streamer.get_latest()
 
         # 使用 .get 安全获取，防止初始化时的 KeyError
-        kline_1m = data.get('kline_1m')
+        kline_5m = data.get('kline_5m')
         kline_15m = data.get('kline_15m')
         book = data.get('orderbook')
         funding = data.get('funding_rate', 0.0)
         btc_price = data.get('btc_price', 0.0)
 
-        return kline_1m, kline_15m, book, funding, btc_price
+        return kline_5m, kline_15m, book, funding, btc_price
 
     def get_precision_amount(self, amount, price):
         """将数量转换为交易所规定的精度"""

@@ -117,3 +117,229 @@ class RollingVolatilityCalculator:
                 vol_values[f"T_{T}"] = 0.0
 
         return vol_values
+
+
+class BollingerBands:
+    """布林带指标 (20周期, 2倍标准差)"""
+    
+    def __init__(self, period=20, std_mult=2.0):
+        self.period = period
+        self.std_mult = std_mult
+    
+    def calculate(self, df):
+        """
+        计算布林带
+        Returns: (middle, upper, lower, distance)
+            middle: 中轨 (SMA)
+            upper: 上轨
+            lower: 下轨
+            distance: 归一化距离 (close - middle) / (upper - lower)
+        """
+        close = df['close']
+        middle = close.rolling(window=self.period).mean()
+        std = close.rolling(window=self.period).std()
+        upper = middle + self.std_mult * std
+        lower = middle - self.std_mult * std
+        
+        # 归一化距离: (close - middle) / (upper - lower)
+        band_width = upper - lower
+        distance = (close - middle) / band_width.replace(0, np.nan)
+        distance = distance.fillna(0)
+        
+        return {
+            'middle': middle.iloc[-1] if len(middle) > 0 else 0.0,
+            'upper': upper.iloc[-1] if len(upper) > 0 else 0.0,
+            'lower': lower.iloc[-1] if len(lower) > 0 else 0.0,
+            'distance': distance.iloc[-1] if len(distance) > 0 else 0.0,
+            'middle_series': middle,
+            'upper_series': upper,
+            'lower_series': lower
+        }
+    
+    def get_latest(self, df):
+        """获取最新的布林带值"""
+        result = self.calculate(df)
+        return result['middle'], result['upper'], result['lower'], result['distance']
+
+
+class SuperTrend:
+    """SuperTrend指标 (ATR周期10, 乘数3)"""
+    
+    def __init__(self, atr_period=10, multiplier=3.0):
+        self.atr_period = atr_period
+        self.multiplier = multiplier
+    
+    def calculate(self, df):
+        """
+        计算SuperTrend
+        Returns: (value, direction)
+            value: SuperTrend值
+            direction: 1=绿(多), -1=红(空)
+        """
+        high = df['high']
+        low = df['low']
+        close = df['close']
+        
+        # 计算ATR
+        atr = MathUtils.calc_atr(df, self.atr_period)
+        
+        # 计算基础上下轨
+        hl2 = (high + low) / 2
+        upper_basic = hl2 + self.multiplier * atr
+        lower_basic = hl2 - self.multiplier * atr
+        
+        # 初始化SuperTrend
+        supertrend = pd.Series(index=df.index, dtype=float)
+        direction = pd.Series(index=df.index, dtype=int)
+        
+        # 第一个值
+        supertrend.iloc[0] = upper_basic.iloc[0]
+        direction.iloc[0] = -1
+        
+        # 递归计算
+        for i in range(1, len(df)):
+            # 更新上轨
+            if lower_basic.iloc[i] > supertrend.iloc[i-1] or close.iloc[i-1] < supertrend.iloc[i-1]:
+                upper = upper_basic.iloc[i]
+            else:
+                upper = min(upper_basic.iloc[i], supertrend.iloc[i-1])
+            
+            # 更新下轨
+            if upper_basic.iloc[i] < supertrend.iloc[i-1] or close.iloc[i-1] > supertrend.iloc[i-1]:
+                lower = lower_basic.iloc[i]
+            else:
+                lower = max(lower_basic.iloc[i], supertrend.iloc[i-1])
+            
+            # 判断方向和SuperTrend值
+            if close.iloc[i] > supertrend.iloc[i-1]:
+                supertrend.iloc[i] = lower
+                direction.iloc[i] = 1  # 绿色(多)
+            else:
+                supertrend.iloc[i] = upper
+                direction.iloc[i] = -1  # 红色(空)
+        
+        return {
+            'value': supertrend.iloc[-1] if len(supertrend) > 0 else 0.0,
+            'direction': direction.iloc[-1] if len(direction) > 0 else 0,
+            'value_series': supertrend,
+            'direction_series': direction
+        }
+    
+    def get_latest(self, df):
+        """获取最新的SuperTrend值和方向"""
+        result = self.calculate(df)
+        return result['value'], result['direction']
+
+
+class MACDCalculator:
+    """MACD指标 (12, 26, 9)"""
+    
+    def __init__(self, fast=12, slow=26, signal=9):
+        self.fast = fast
+        self.slow = slow
+        self.signal = signal
+    
+    def calculate(self, df):
+        """
+        计算MACD
+        Returns: (macd, signal, histogram, normalized)
+            macd: MACD线 (快线-慢线)
+            signal: 信号线
+            histogram: 柱状图
+            normalized: 归一化MACD (MACD/Close)
+        """
+        close = df['close']
+        
+        ema_fast = close.ewm(span=self.fast, adjust=False).mean()
+        ema_slow = close.ewm(span=self.slow, adjust=False).mean()
+        
+        macd = ema_fast - ema_slow
+        signal = macd.ewm(span=self.signal, adjust=False).mean()
+        histogram = macd - signal
+        
+        # 归一化: MACD / Close
+        normalized = macd / close.replace(0, np.nan)
+        normalized = normalized.fillna(0)
+        
+        return {
+            'macd': macd.iloc[-1] if len(macd) > 0 else 0.0,
+            'signal': signal.iloc[-1] if len(signal) > 0 else 0.0,
+            'histogram': histogram.iloc[-1] if len(histogram) > 0 else 0.0,
+            'normalized': normalized.iloc[-1] if len(normalized) > 0 else 0.0,
+            'macd_series': macd,
+            'signal_series': signal
+        }
+    
+    def get_latest(self, df):
+        """获取最新的MACD值"""
+        result = self.calculate(df)
+        return result['macd'], result['signal'], result['histogram'], result['normalized']
+
+
+class KDJCalculator:
+    """KDJ指标 (9, 3, 3)"""
+    
+    def __init__(self, k_period=9, d_period=3, j_smooth=3):
+        self.k_period = k_period
+        self.d_period = d_period
+        self.j_smooth = j_smooth
+    
+    def calculate(self, df):
+        """
+        计算KDJ
+        Returns: (k, d, j, k_minus_d, golden_cross, death_cross)
+            k: K值
+            d: D值
+            j: J值
+            k_minus_d: K-D差值
+            golden_cross: 是否金叉 (K上穿D)
+            death_cross: 是否死叉 (K下穿D)
+        """
+        high = df['high']
+        low = df['low']
+        close = df['close']
+        
+        # 计算RSV (Raw Stochastic Value)
+        lowest_low = low.rolling(window=self.k_period).min()
+        highest_high = high.rolling(window=self.k_period).max()
+        rsv = (close - lowest_low) / (highest_high - lowest_low + 1e-9) * 100
+        
+        # 计算K值 (RSV的EMA)
+        k = rsv.ewm(com=self.d_period - 1, adjust=False).mean()
+        
+        # 计算D值 (K的EMA)
+        d = k.ewm(com=self.j_smooth - 1, adjust=False).mean()
+        
+        # 计算J值
+        j = 3 * k - 2 * d
+        
+        # K-D差值
+        k_minus_d = k - d
+        
+        # 金叉/死叉判断
+        golden_cross = False
+        death_cross = False
+        if len(k) >= 2 and len(d) >= 2:
+            # 金叉: K从下往上穿过D
+            if k.iloc[-2] < d.iloc[-2] and k.iloc[-1] > d.iloc[-1]:
+                golden_cross = True
+            # 死叉: K从上往下穿过D
+            if k.iloc[-2] > d.iloc[-2] and k.iloc[-1] < d.iloc[-1]:
+                death_cross = True
+        
+        return {
+            'k': k.iloc[-1] if len(k) > 0 else 50.0,
+            'd': d.iloc[-1] if len(d) > 0 else 50.0,
+            'j': j.iloc[-1] if len(j) > 0 else 50.0,
+            'k_minus_d': k_minus_d.iloc[-1] if len(k_minus_d) > 0 else 0.0,
+            'golden_cross': golden_cross,
+            'death_cross': death_cross,
+            'k_series': k,
+            'd_series': d
+        }
+    
+    def get_latest(self, df):
+        """获取最新的KDJ值"""
+        result = self.calculate(df)
+        return result['k'], result['d'], result['j'], result['k_minus_d'], result['golden_cross'], result['death_cross']
+

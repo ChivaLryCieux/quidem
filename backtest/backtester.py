@@ -2,9 +2,9 @@
 回测器 - 基于现有 core 模块的统一回测系统
 
 使用示例：
-  python backtest/backtester.py --symbol XRP/USDT --balance 100
-  python backtest/backtester.py --symbol XRP/USDT --lookback-days 30
-  python backtest/backtester.py --symbol XRP/USDT --since "2025-01-01" --end "2025-02-01"
+  python backtest/backtester.py --symbol SOL/USDT --balance 100
+  python backtest/backtester.py --symbol SOL/USDT --lookback-days 30
+  python backtest/backtester.py --symbol SOL/USDT --since "2025-01-01" --end "2025-02-01"
 
 输出文件（默认保存到 backtest/outputs/YYYYMMDD_HHMMSS/）：
   - 01_price.png: 价格与交易标记
@@ -15,7 +15,7 @@
 
 # ========== 回测超参数配置 ==========
 KLINE_LIMIT_15M = 35000  # 15分钟K线数量
-KLINE_LIMIT_1M = 500000  # 1分钟K线数量
+KLINE_LIMIT_5M = 100000  # 5分钟K线数量
 
 import os
 import sys
@@ -214,13 +214,14 @@ class StrategyBacktesterUnified:
         curr_rsi = analysis.get('rsi', 50.0)
         cluster_info = analysis.get('cluster', (99, 0))
 
-        tp_dist = max(atr_15m * 3, eprice * Config.MIN_TP_DISTANCE)
-        sl_atr = atr_15m if atr_15m > 0 else atr_1m
-        sl_dist = max(sl_atr * 10.0, eprice * 0.05)
+        tp_dist = eprice * Config.MIN_TP_DISTANCE  # 止盈: 0.35% (简化，不依赖ATR)
+        sl_dist = eprice * Config.MAX_SL_DISTANCE   # 止损: 0.6% (盈亏比约1:1.7)
 
         risk_pct = float(getattr(Config, "RISK_APPETITE", 0.03))
         risk_budget = max(0.0, usable_balance * risk_pct)
-        amt_by_margin = (usable_balance * 0.98) / ((1 / lev) + Config.TAKER_FEE_RATE) / price
+        # 每次只用 20% 资金开仓 (原98%导致单次亏损过大)
+        position_size_pct = 0.20
+        amt_by_margin = (usable_balance * position_size_pct) / ((1 / lev) + Config.TAKER_FEE_RATE) / price
         amt = max(0.0, amt_by_margin)
         
         if amt * price < 5.0:
@@ -366,43 +367,34 @@ class StrategyBacktesterUnified:
         print(f"📁 输出目录: {self.run_dir}")
 
         ex = _make_exchange(True)
-        data_1m = _fetch_ohlcv(ex, self.symbol, '1m', limit_1m, since=self.since_ms)
+        data_5m = _fetch_ohlcv(ex, self.symbol, '5m', limit_1m, since=self.since_ms)
         data_15m = _fetch_ohlcv(ex, self.symbol, '15m', limit_15m, since=self.since_ms)
         
         if self.end_ms:
-            data_1m = [c for c in data_1m if c[0] <= self.end_ms]
+            data_5m = [c for c in data_5m if c[0] <= self.end_ms]
             data_15m = [c for c in data_15m if c[0] <= self.end_ms]
             
-        self.data_1m_cache = data_1m
-        print(f"数据就绪: 1m={len(data_1m)}, 15m={len(data_15m)}")
+        self.data_1m_cache = data_5m  # 兼容性保留
+        print(f"数据就绪: 5m={len(data_5m)}, 15m={len(data_15m)}")
         
         idx_15 = 0
         processed_count = 0
-        total_steps = len(data_1m)
+        total_steps = len(data_5m)
         
-        for i, c1 in enumerate(data_1m):
-            current_time_ms = int(c1[0])
+        for i, c5 in enumerate(data_5m):
+            current_time_ms = int(c5[0])
             
-            if i % 10000 == 0:
+            if i % 5000 == 0:
                 print(f"进度: {i}/{total_steps} ({(i/total_steps)*100:.1f}%) | 余额: {self.balance:.2f} | 交易: {len(self.trades)}")
 
-            # 15m：用已完成的 15m K 线更新特征；只处理时间不晚于当前 1m 的 15m K
-            while idx_15 < len(data_15m) and data_15m[idx_15][0] <= c1[0]:
+            # 15m：用已完成的 15m K 线更新特征；只处理时间不晚于当前 5m 的 15m K
+            while idx_15 < len(data_15m) and data_15m[idx_15][0] <= c5[0]:
                 c15 = data_15m[idx_15]
-                
                 self.brain.ingest_candle(c15, '15m')
-                
-                res15 = self.brain.analyze()
-                
-                # 15分钟K线收盘时检查开仓机会
-                if self.position['size'] == 0 and res15 and not self.risk.is_in_cooldown(now_ms=int(c15[0])):
-                    price_15m = float(c15[4])
-                    self._attempt_entry(res15, price_15m, int(c15[0]))
-                
                 idx_15 += 1
 
-            # 1m：执行交易逻辑（持仓管理/出场） - 开仓只在15分钟K线收盘时检查
-            self.brain.ingest_candle(c1, '1m')
+            # 5m：执行交易逻辑
+            self.brain.ingest_candle(c5, '5m')
             analysis = self.brain.analyze()
             
             if not analysis: continue
@@ -410,16 +402,21 @@ class StrategyBacktesterUnified:
             processed_count += 1
             if processed_count < self.warmup_steps: continue
 
-            if self._intrabar_exit(c1, current_time_ms, analysis): continue
+            if self._intrabar_exit(c5, current_time_ms, analysis): continue
             
-            price = float(c1[4])
+            price = float(c5[4])
+            
+            # 开仓逻辑
+            if self.position['size'] == 0 and not self.risk.is_in_cooldown(now_ms=current_time_ms):
+                self._attempt_entry(analysis, price, current_time_ms)
+            
+            # 持仓管理
             if self.position['size'] != 0:
                 self._manage_position(price, analysis, current_time_ms)
-            # 开仓逻辑移到15分钟K线处理部分
         
         # 回测结束：若仍持仓则按最后一根K线收盘价平仓
-        if self.position['size'] != 0 and len(data_1m) > 0:
-            self._execute_exit("结束平仓", float(data_1m[-1][4]), int(data_1m[-1][0]))
+        if self.position['size'] != 0 and len(data_5m) > 0:
+            self._execute_exit("结束平仓", float(data_5m[-1][4]), int(data_5m[-1][0]))
             
         self._save_csv()
         self._report()
@@ -439,8 +436,6 @@ class StrategyBacktesterUnified:
         cols = {
             'Time': 'Time', 'action': 'Action', 'reason': 'Reason', 'direction': 'Direction',
             'Duration_Str': 'Duration', 'regime': 'Entry_Regime', 
-            'entry_rsi': 'Entry_RSI', 'exit_rsi': 'Exit_RSI',
-            'entry_atr': 'Entry_ATR', 'exit_atr': 'Exit_ATR',
             'flips': 'Flips', 'exit_price': 'Price', 'pnl': 'PnL', 'balance': 'Balance', 'cluster': 'Cluster'
         }
         
@@ -690,7 +685,7 @@ if __name__ == "__main__":
     parser.add_argument("--symbol", type=str, default=Config.SYMBOL)
     parser.add_argument("--balance", type=float, default=100.0)
     parser.add_argument("--slippage", type=float, default=0.0002)
-    parser.add_argument("--limit-1m", type=int, default=KLINE_LIMIT_1M)
+    parser.add_argument("--limit-5m", type=int, default=KLINE_LIMIT_5M)
     parser.add_argument("--limit-15m", type=int, default=KLINE_LIMIT_15M)
     parser.add_argument("--save", type=str, default="")
     parser.add_argument("--since-ms", type=int, default=None)
@@ -741,4 +736,4 @@ if __name__ == "__main__":
     except Exception:
         bt.plot_figsize = (14, 9)
     
-    bt.run(limit_1m=args.limit_1m, limit_15m=args.limit_15m)
+    bt.run(limit_1m=args.limit_5m, limit_15m=args.limit_15m)
