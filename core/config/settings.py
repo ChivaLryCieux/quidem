@@ -26,8 +26,8 @@ class Config:
 
     # 资金管理
     MIN_LEVERAGE = 5.0
-    MAX_LEVERAGE = 20.0       # 杠杆范围 5x-30x，默认20x
-    DEFAULT_LEVERAGE = 20.0
+    MAX_LEVERAGE = 10.0       # 降低杠杆，减少手续费影响
+    DEFAULT_LEVERAGE = 10.0
     RISK_APPETITE = 0.05      # 目标单笔净利 5%
     TAKER_FEE_RATE = 0.0005
 
@@ -37,9 +37,9 @@ class Config:
     BAILOUT_ON_NTH_FLIP = 5
     FEE_BUFFER_PCT = 0.0012
     MIN_ATR_PCT = 0.0020
-    MIN_TP_DISTANCE = 0.005   # 止盈目标：0.5%价格波动 (约8%本金盈利)
-    MAX_SL_DISTANCE = 0.0025  # 硬止损：0.25%价格反向波动 (约4%本金亏损)
-    # 盈亏比 2:1，即使50%胜率也能盈利
+    MIN_TP_DISTANCE = 0.006   # 止盈目标：0.6%价格波动 (10x杠杆=6%本金)
+    MAX_SL_DISTANCE = 0.005   # 硬止损：0.5%价格反向 (10x杠杆=5%本金)
+    # 盈亏比 1.2:1，55%胜率即可盈利，但给价格足够波动空间
 
     # 微观结构
     OBI_THRESHOLD_TREND = -0.2

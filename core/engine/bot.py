@@ -219,13 +219,16 @@ class QuantBot:
         pos = self.trader.position
         unrealized = (price - pos['entry_price']) * pos['size'] if pos['size'] != 0 else 0
         
-        # Update UI
+        # Update UI with MACD, BB middle, SuperTrend
         if analysis:
-            obi = analysis.get('obi', 0.0)
             cluster = analysis.get('cluster', (99, 0.0))[0]
+            macd_hist = analysis.get('macd_histogram', 0.0)
+            bb_mid = analysis.get('bb_middle', 0.0)
+            st_val = analysis.get('supertrend_value', 0.0)
             self.ui.update_status(
                 pos['size'], self.brain.state, self.brain.color,
-                obi, unrealized, price, cluster
+                unrealized, price, cluster,
+                macd=macd_hist, bb_mid=bb_mid, st_val=st_val
             )
 
     def _send_heartbeat(self, price, analysis):

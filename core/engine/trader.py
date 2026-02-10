@@ -87,15 +87,15 @@ class TradeExecutor:
         analysis = self.brain.analyze()
         atr = analysis.get('atr', 0.0) if analysis else 0.0
 
-        # Trailing TP
+        # Trailing TP (更温和的追踪止盈)
         if self.profit_flip_count >= 1:
-            original_tp_distance = max(atr * 2, pos['entry_price'] * Config.MIN_TP_DISTANCE)
+            original_tp_distance = pos['entry_price'] * Config.MIN_TP_DISTANCE
             if self.profit_flip_count == 1:
-                adj_dist = original_tp_distance
+                adj_dist = original_tp_distance  # 100% 距离
             elif self.profit_flip_count == 2:
-                adj_dist = original_tp_distance * 0.75
-            else:
-                adj_dist = 0.0 # Aggressive exit
+                adj_dist = original_tp_distance * 0.75  # 75% 距离
+            elif self.profit_flip_count >= 3:
+                adj_dist = original_tp_distance * 0.5  # 50% 距离 (不再设为0)
 
             if pos['size'] > 0:
                 pos['tp'] = pos['entry_price'] + adj_dist
@@ -141,7 +141,7 @@ class TradeExecutor:
 
             # Calc Amount
             amount = self.exchange.get_precision_amount(
-                (self.balance * 0.99) / ((1 / lev) + Config.TAKER_FEE_RATE) / price, price
+                (self.balance * 0.20) / ((1 / lev) + Config.TAKER_FEE_RATE) / price, price
             )
 
             if amount > 0:
@@ -149,9 +149,9 @@ class TradeExecutor:
                 if self.exchange.execute_order(side, amount):
                     self.last_traded_candle_timestamp = timestamp
                     
-                    atr = data.get('atr', 0.0)
-                    sl_dist = price * (1 / lev) * 0.8
-                    tp_dist = max(atr * 2, price * Config.MIN_TP_DISTANCE)
+                    # TP/SL 直接使用 settings 配置
+                    sl_dist = price * Config.MAX_SL_DISTANCE
+                    tp_dist = price * Config.MIN_TP_DISTANCE
 
                     self.position = {
                         'size': amount if sig == 1 else -amount,
@@ -164,7 +164,10 @@ class TradeExecutor:
 
                     self.ui.log_entry(
                         regime, self.brain.color, sig, lev,
-                        data.get('obi', 0.0), price, self.position['sl'], self.position['tp']
+                        price, self.position['sl'], self.position['tp'],
+                        macd=data.get('macd_histogram', 0.0),
+                        bb_mid=data.get('bb_middle', 0.0),
+                        st_val=data.get('supertrend_value', 0.0)
                     )
                     self.profit_flip_count, self.was_in_profit = 0, False
 

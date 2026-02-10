@@ -3,7 +3,8 @@ import numpy as np
 import pandas as pd
 from core.analysis.indicators import (
     MomentumCalculator, RollingVolatilityCalculator, MathUtils,
-    BollingerBands, SuperTrend, MACDCalculator, KDJCalculator
+    BollingerBands, SuperTrend, MACDCalculator, KDJCalculator,
+    ADXCalculator, VWAPCalculator
 )
 
 
@@ -32,6 +33,8 @@ class FeatureEngineer:
         self.supertrend = SuperTrend(atr_period=10, multiplier=3.0)
         self.macd = MACDCalculator(fast=12, slow=26, signal=9)
         self.kdj = KDJCalculator(k_period=9, d_period=3, j_smooth=3)
+        self.adx = ADXCalculator(period=14)
+        self.vwap = VWAPCalculator(period=288)
         
         # 成交量MA周期
         self.vol_ma_period = 96
@@ -100,6 +103,16 @@ class FeatureEngineer:
         # 7. K与D差值 (KDJ)
         # ================================================================
         kdj_result = self.kdj.calculate(history_df)
+        
+        # ================================================================
+        # 8. ADX 趋势强度
+        # ================================================================
+        adx_result = self.adx.calculate(history_df)
+        
+        # ================================================================
+        # 9. VWAP 成交量加权均价
+        # ================================================================
+        vwap_result = self.vwap.calculate(history_df)
         k_minus_d = kdj_result['k_minus_d']
         
         # ================================================================
@@ -165,6 +178,18 @@ class FeatureEngineer:
             'k_minus_d': k_minus_d,
             'kdj_golden_cross': kdj_result['golden_cross'],
             'kdj_death_cross': kdj_result['death_cross'],
+            
+            # ADX
+            'adx': adx_result['adx'],
+            'plus_di': adx_result['plus_di'],
+            'minus_di': adx_result['minus_di'],
+            'adx_rising': adx_result['adx_rising'],
+            
+            # VWAP
+            'vwap': vwap_result['vwap'],
+            'vwap_distance': vwap_result['distance'],
+            'vwap_upper': vwap_result['upper_band'],
+            'vwap_lower': vwap_result['lower_band'],
             
             # 成交量
             'relative_volume': relative_volume,

@@ -44,17 +44,17 @@ class DisplayManager:
         else:
             print(f"{prefix} {Fore.CYAN}ℹ️ [INFO] {msg}{Style.RESET_ALL}")
 
-    def log_entry(self, regime, color, side, leverage, obi, price, sl, tp):
+    def log_entry(self, regime, color, side, leverage, price, sl, tp, macd=0.0, bb_mid=0.0, st_val=0.0):
         self._clear_line()
 
         dir_str = "开多 (LONG)" if side == 1 else "开空 (SHORT)"
         dir_color = Fore.GREEN if side == 1 else Fore.RED
 
         # 构建日志字符串 (用于文件)
-        log_str = f"{regime} | {dir_str} | {leverage}x | OBI:{obi:.2f} | TP:{tp:.4f} | SL:{sl:.4f}"
+        log_str = f"{regime} | {dir_str} | {leverage}x | MACD:{macd:.5f} | TP:{tp:.4f} | SL:{sl:.4f}"
         logger.info(log_str)
 
-        # 构建显示字符串 (用于屏幕，更美观)
+        # 构建显示字符串 (用于屏幕)
         display_str = (
             f"{Fore.MAGENTA}[ENTRY] {Style.RESET_ALL}"
             f"{color}{regime:<8}{Style.RESET_ALL} | "
@@ -82,32 +82,30 @@ class DisplayManager:
         )
         print(display_str)
 
-    def update_status(self, pos, regime, color, obi, pnl, price, cluster_id=5):
+    def update_status(self, pos, regime, color, pnl, price, cluster_id=5, macd=0.0, bb_mid=0.0, st_val=0.0):
         """
         实时刷新状态栏
-        注意：尽量使用定宽格式化 (e.g. :<10, :.4f) 防止字符串长度抖动
+        显示: MACD柱状图 | 布林带中轨 | SuperTrend值 | 价格 | PnL
         """
-        # 安全处理空值
         regime = regime if regime else "N/A"
         color = color if color else ""
 
         status_icon = "🟢" if pos > 0 else "🔴" if pos < 0 else "⚪"
         pnl_c = Fore.GREEN if pnl >= 0 else Fore.RED
+        macd_c = Fore.GREEN if macd >= 0 else Fore.RED
         
-        # HMM 状态名称映射
-        state_names = {0: "跌", 1: "弱跌", 2: "震荡", 3: "弱涨", 4: "涨", 99: "初始"}
-        state_name = state_names.get(cluster_id, "?")
+        # SuperTrend方向标记
+        st_dir = "▲" if st_val > 0 and st_val < price else "▼"
 
-        # 状态栏格式化
-        # \033[K 确保清除上一帧残留的字符
         info_str = (
             f"\r\033[K"
             f"{status_icon} "
             f"{color}{regime:<8}{Style.RESET_ALL} | "
-            f"OBI:{obi:>+5.2f} | "  # 强制显示符号，宽度5
-            f"P:{price:<8.4f} | "  # 左对齐，保留4位小数
-            f"S{cluster_id}({state_name}) | "  # 状态ID + 名称
-            f"{pnl_c}${pnl:>+7.2f}{Style.RESET_ALL}"  # PnL 右对齐
+            f"MACD:{macd_c}{macd:>+8.4f}{Style.RESET_ALL} | "
+            f"BB:{bb_mid:<8.2f} | "
+            f"ST{st_dir}:{st_val:<8.2f} | "
+            f"P:{price:<8.4f} | "
+            f"{pnl_c}${pnl:>+7.2f}{Style.RESET_ALL}"
         )
 
         sys.stdout.write(info_str)

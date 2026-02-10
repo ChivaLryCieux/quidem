@@ -71,19 +71,18 @@ class RiskManager:
         current_equity_pnl = raw_pnl_pct * Config.MAX_LEVERAGE
 
         # ================================================================
-        # 1. 止盈检查: Entry * (1 ± 0.0035) ≈ 5% 本金收益
+        # 1. 显式TP价格检查 (基于trader.py设置的TP价格)
         # ================================================================
-        tp_distance = max(Config.MIN_TP_DISTANCE, 2 * atr / entry_price if atr > 0 else Config.MIN_TP_DISTANCE)
-        if raw_pnl_pct >= tp_distance:
-            return True, f"💰 TP({tp_distance*100:.2f}%)"
-        
-        # 显式TP/SL检查
         if pos_size > 0:
             if current_price >= tp:
                 return True, "💰 TP"
         else:
             if current_price <= tp:
                 return True, "💰 TP"
+        
+        # 2. 百分比TP兜底 (防止TP价格计算错误时的保护)
+        if raw_pnl_pct >= Config.MIN_TP_DISTANCE:
+            return True, f"💰 TP({Config.MIN_TP_DISTANCE*100:.2f}%)"
 
         # ================================================================
         # 2. 硬止损: 0.6% 价格反向波动 (本金亏损约12%)

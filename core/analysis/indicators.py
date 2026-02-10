@@ -343,3 +343,183 @@ class KDJCalculator:
         result = self.calculate(df)
         return result['k'], result['d'], result['j'], result['k_minus_d'], result['golden_cross'], result['death_cross']
 
+
+class ADXCalculator:
+    """ADX指标 (Average Directional Index)
+    
+    用于判断趋势强度：
+    - ADX > 25: 强趋势 → 适合趋势跟随
+    - ADX 20-25: 弱趋势 → 谨慎交易
+    - ADX < 20: 无趋势/震荡 → 禁止开仓
+    """
+    
+    def __init__(self, period=14):
+        self.period = period
+    
+    def calculate(self, df):
+        """
+        计算ADX (使用标准Wilder平滑)
+        Returns: dict with adx, plus_di, minus_di, adx_rising
+        """
+        if len(df) < self.period * 2:
+            return {
+                'adx': 0.0, 'plus_di': 0.0, 'minus_di': 0.0,
+                'adx_rising': False, 'adx_series': pd.Series(dtype=float),
+                'plus_di_series': pd.Series(dtype=float),
+                'minus_di_series': pd.Series(dtype=float)
+            }
+        
+        high = df['high'].values
+        low = df['low'].values
+        close = df['close'].values
+        n = len(df)
+        period = self.period
+        
+        # 计算 True Range, +DM, -DM
+        tr = np.zeros(n)
+        plus_dm = np.zeros(n)
+        minus_dm = np.zeros(n)
+        
+        for i in range(1, n):
+            h_diff = high[i] - high[i-1]
+            l_diff = low[i-1] - low[i]
+            
+            tr[i] = max(high[i] - low[i], 
+                       abs(high[i] - close[i-1]), 
+                       abs(low[i] - close[i-1]))
+            
+            if h_diff > l_diff and h_diff > 0:
+                plus_dm[i] = h_diff
+            if l_diff > h_diff and l_diff > 0:
+                minus_dm[i] = l_diff
+        
+        # Wilder平滑 (初始值用简单求和，之后递推)
+        atr_smooth = np.zeros(n)
+        plus_dm_smooth = np.zeros(n)
+        minus_dm_smooth = np.zeros(n)
+        
+        # 初始值: 前period个的简单求和
+        atr_smooth[period] = np.sum(tr[1:period+1])
+        plus_dm_smooth[period] = np.sum(plus_dm[1:period+1])
+        minus_dm_smooth[period] = np.sum(minus_dm[1:period+1])
+        
+        # Wilder递推
+        for i in range(period + 1, n):
+            atr_smooth[i] = atr_smooth[i-1] - atr_smooth[i-1] / period + tr[i]
+            plus_dm_smooth[i] = plus_dm_smooth[i-1] - plus_dm_smooth[i-1] / period + plus_dm[i]
+            minus_dm_smooth[i] = minus_dm_smooth[i-1] - minus_dm_smooth[i-1] / period + minus_dm[i]
+        
+        # +DI, -DI
+        plus_di_arr = np.zeros(n)
+        minus_di_arr = np.zeros(n)
+        dx_arr = np.zeros(n)
+        
+        for i in range(period, n):
+            if atr_smooth[i] > 0:
+                plus_di_arr[i] = 100 * plus_dm_smooth[i] / atr_smooth[i]
+                minus_di_arr[i] = 100 * minus_dm_smooth[i] / atr_smooth[i]
+            
+            di_sum = plus_di_arr[i] + minus_di_arr[i]
+            if di_sum > 0:
+                dx_arr[i] = 100 * abs(plus_di_arr[i] - minus_di_arr[i]) / di_sum
+        
+        # ADX: DX的Wilder平滑
+        adx_arr = np.zeros(n)
+        start = period * 2
+        if start < n:
+            adx_arr[start] = np.mean(dx_arr[period:start+1])
+            for i in range(start + 1, n):
+                adx_arr[i] = (adx_arr[i-1] * (period - 1) + dx_arr[i]) / period
+        
+        # 转为Series
+        idx = df.index
+        adx_series = pd.Series(adx_arr, index=idx)
+        plus_di_series = pd.Series(plus_di_arr, index=idx)
+        minus_di_series = pd.Series(minus_di_arr, index=idx)
+        
+        adx_val = float(adx_arr[-1])
+        adx_rising = adx_arr[-1] > adx_arr[-3] if n >= 3 else False
+        
+        return {
+            'adx': adx_val,
+            'plus_di': float(plus_di_arr[-1]),
+            'minus_di': float(minus_di_arr[-1]),
+            'adx_rising': bool(adx_rising),
+            'adx_series': adx_series,
+            'plus_di_series': plus_di_series,
+            'minus_di_series': minus_di_series
+        }
+    
+    def get_latest(self, df):
+        """获取最新ADX值"""
+        result = self.calculate(df)
+        return result['adx'], result['plus_di'], result['minus_di'], result['adx_rising']
+
+
+class VWAPCalculator:
+    """VWAP指标 (Volume Weighted Average Price)
+    
+    用于确认交易方向：
+    - 价格 > VWAP: 买方主导 → 偏向做多
+    - 价格 < VWAP: 卖方主导 → 偏向做空
+    
+    使用滚动窗口VWAP (适配5分钟K线，288根=1天)
+    """
+    
+    def __init__(self, period=288):
+        self.period = period  # 滚动窗口 (288根5分钟K线 = 1天)
+    
+    def calculate(self, df):
+        """
+        计算VWAP
+        Returns: dict with vwap, distance (百分比), upper_band, lower_band
+        """
+        close = df['close']
+        volume = df['volume']
+        high = df['high']
+        low = df['low']
+        
+        # 典型价格 = (High + Low + Close) / 3
+        typical_price = (high + low + close) / 3
+        
+        # 使用min_periods=1避免NaN
+        win = min(self.period, len(df))
+        tp_vol = typical_price * volume
+        rolling_tp_vol = tp_vol.rolling(window=win, min_periods=1).sum()
+        rolling_vol = volume.rolling(window=win, min_periods=1).sum()
+        
+        vwap = rolling_tp_vol / (rolling_vol + 1e-9)
+        
+        # VWAP标准差带
+        tp_diff_sq = ((typical_price - vwap) ** 2) * volume
+        rolling_var = tp_diff_sq.rolling(window=win, min_periods=1).sum() / (rolling_vol + 1e-9)
+        vwap_std = np.sqrt(rolling_var.clip(lower=0))
+        
+        upper_band = vwap + 2 * vwap_std
+        lower_band = vwap - 2 * vwap_std
+        
+        # 百分比距离: (close - vwap) / vwap * 100
+        # 正值=价格在VWAP上方, 负值=价格在VWAP下方
+        distance = ((close - vwap) / (vwap + 1e-9)) * 100
+        distance = distance.fillna(0).clip(-5, 5)
+        
+        vwap_val = float(vwap.iloc[-1]) if len(vwap) > 0 else float(close.iloc[-1])
+        dist_val = float(distance.iloc[-1]) if len(distance) > 0 else 0.0
+        
+        # NaN保护
+        if np.isnan(vwap_val): vwap_val = float(close.iloc[-1])
+        if np.isnan(dist_val): dist_val = 0.0
+        
+        return {
+            'vwap': vwap_val,
+            'distance': dist_val,
+            'upper_band': float(upper_band.iloc[-1]) if len(upper_band) > 0 else 0.0,
+            'lower_band': float(lower_band.iloc[-1]) if len(lower_band) > 0 else 0.0,
+            'vwap_series': vwap,
+            'distance_series': distance
+        }
+    
+    def get_latest(self, df):
+        """获取最新的VWAP值"""
+        result = self.calculate(df)
+        return result['vwap'], result['distance']
