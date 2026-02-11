@@ -223,12 +223,12 @@ class QuantBot:
         if analysis:
             cluster = analysis.get('cluster', (99, 0.0))[0]
             macd_hist = analysis.get('macd_histogram', 0.0)
-            bb_mid = analysis.get('bb_middle', 0.0)
+            bb_dist = analysis.get('bb_distance', 0.0)
             st_val = analysis.get('supertrend_value', 0.0)
             self.ui.update_status(
                 pos['size'], self.brain.state, self.brain.color,
                 unrealized, price, cluster,
-                macd=macd_hist, bb_mid=bb_mid, st_val=st_val
+                macd=macd_hist, bb_dist=bb_dist, st_val=st_val
             )
 
     def _send_heartbeat(self, price, analysis):

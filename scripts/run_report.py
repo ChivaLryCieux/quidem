@@ -15,7 +15,7 @@ from core.utils.reporting import ReportService
 from core.config.settings import Config
 
 # Configurations (Should ideally be in Config, but kept here for now as in original)
-MAIL_FROM = "XRP Bot <report@abyssalfish.top>"
+MAIL_FROM = "CTA q-bot <report@abyssalfish.top>"
 # You might want to move these to Config.SETTINGS_MAIL_TO if appropriate
 MAIL_TO = getattr(Config, "MAIL_TO", ["3433551710@qq.com", "2874575651@qq.com", "2129325064@qq.com"])
 RESEND_API_KEY = getattr(Config, "RESEND_API_KEY", "re_39zFrC4s_KhUDNyHg8ZFRR8LkXg8cN8Ry")
@@ -65,7 +65,7 @@ def job():
             
             params = {
                 "from": MAIL_FROM, "to": MAIL_TO,
-                "subject": f"📊 [Report] XRP Bot | {len(trades)} Trades | 状态: {current_state_name}",
+                "subject": f"📊 [Report] CTA q-bot | {len(trades)} Trades | 状态: {current_state_name}",
                 "html": html,
                 "attachments": [{"filename": csv_name, "content": csv_content}] if csv_content else []
             }
@@ -85,7 +85,7 @@ def job():
             
             params = {
                 "from": MAIL_FROM, "to": MAIL_TO,
-                "subject": f"😴 [Silence] XRP Bot | Bal: ${bal:.2f} | 状态: {current_state_name}",
+                "subject": f"😴 [Silence] CTA q-bot | Bal: ${bal:.2f} | 状态: {current_state_name}",
                 "html": html
             }
             resend.Emails.send(params)

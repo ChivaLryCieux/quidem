@@ -34,7 +34,7 @@ class Config:
     MAX_FUNDING_RATE_THRESHOLD = 0.0005
 
     # 策略参数
-    BAILOUT_ON_NTH_FLIP = 5
+    BAILOUT_ON_NTH_FLIP = 99  # 基本禁用flip平仓，只靠TP/SL
     FEE_BUFFER_PCT = 0.0012
     MIN_ATR_PCT = 0.0020
     MIN_TP_DISTANCE = 0.006   # 止盈目标：0.6%价格波动 (10x杠杆=6%本金)

@@ -16,7 +16,7 @@ class DisplayManager:
         os.system('cls' if os.name == 'nt' else 'clear')  # 启动时清屏
         print()
         print(f"{Fore.CYAN}=========================================")
-        print(f"   {Config.SYMBOL} 高频量化终端")
+        print(f"   {Config.SYMBOL} 短线量化CTA系统终端")
         print(f"========================================={Style.RESET_ALL}")
         print(f"{Fore.GREEN}>>> 模式: {mode_name}{Style.RESET_ALL}")
         if strategy_desc:
@@ -82,7 +82,7 @@ class DisplayManager:
         )
         print(display_str)
 
-    def update_status(self, pos, regime, color, pnl, price, cluster_id=5, macd=0.0, bb_mid=0.0, st_val=0.0):
+    def update_status(self, pos, regime, color, pnl, price, cluster_id=5, macd=0.0, bb_dist=0.0, st_val=0.0):
         """
         实时刷新状态栏
         显示: MACD柱状图 | 布林带中轨 | SuperTrend值 | 价格 | PnL
@@ -102,7 +102,7 @@ class DisplayManager:
             f"{status_icon} "
             f"{color}{regime:<8}{Style.RESET_ALL} | "
             f"MACD:{macd_c}{macd:>+8.4f}{Style.RESET_ALL} | "
-            f"BB:{bb_mid:<8.2f} | "
+            f"BB:{bb_dist:>+5.2f} | "
             f"ST{st_dir}:{st_val:<8.2f} | "
             f"P:{price:<8.4f} | "
             f"{pnl_c}${pnl:>+7.2f}{Style.RESET_ALL}"
