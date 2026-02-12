@@ -43,7 +43,6 @@ class StateMachine:
     def __init__(self):
         self.state, self.color = "INIT", Fore.WHITE
         self.ob_analyzer = OrderBookAnalyzer()
-        self.last_cluster = 99
         self.supertrend_15m_direction = 0
         self.bars_since_last_trade = 99  # 初始设为大值，允许首次交易
 
@@ -177,14 +176,3 @@ class StateMachine:
             self.bars_since_last_trade = 0
         
         return sig, lev
-
-
-def check_forced_exit(state_id, position_size):
-    """检查是否需要强制平仓"""
-    if position_size == 0:
-        return False, ""
-    if state_id == 0 and position_size > 0:
-        return True, "State 0 大跌 - 平多单"
-    if state_id == 4 and position_size < 0:
-        return True, "State 4 大涨 - 平空单"
-    return False, ""

@@ -6,12 +6,11 @@
 2. 资金费率风险检查
 3. 熔断机制
 4. 时间防御
-5. HMM状态强制平仓
+5. 盈利翻转逃逸
 
 止盈止损规则:
-- 止盈: Entry * (1 ± 0.0035) ≈ 5% 本金收益
-- 硬止损: 价格反向 0.6% (本金 ~12%)
-- 动态止盈: 趋势状态可持有至布林带对侧
+- 止盈: 0.6% 价格波动 (10x杠杆=6%本金)
+- 硬止损: 0.5% 价格反向 (10x杠杆=5%本金)
 """
 
 import time
@@ -21,7 +20,6 @@ from core.config import Config
 class RiskManager:
     def __init__(self):
         self.cooldown_end_time = 0
-        self.oscillation_thresholds = {1: 999.0, 2: 0.0025, 3: Config.FEE_BUFFER_PCT}
         self.circuit_breaker_rules = [(-0.20, 48), (-0.10, 24), (0.0, 0)]
         self.time_defense_rules = [(5, -0.01), (30, -0.02)]
         self.time_defense_enabled = False
@@ -36,29 +34,17 @@ class RiskManager:
         return False, ""
 
     def check_exit_conditions(self, position_data, current_price, current_time_ms, 
-                              flips_count, atr=0.0, entry_balance=100.0, hmm_state=None):
+                              flips_count, atr=0.0, entry_balance=100.0):
         """
         检查平仓条件
         
-        新规则:
-        1. 止盈: 本金 + max{最小止盈距离, 2倍ATR}
-        2. 硬止损: 0.6% 价格反向波动
-        3. 震荡逃逸: 盈利翻转机制
-        4. 时间防御: 可选启用
-        
-        Args:
-            position_data: 持仓数据
-            current_price: 当前价格
-            current_time_ms: 当前时间戳
-            flips_count: 盈利翻转次数
-            atr: ATR值
-            entry_balance: 入场时余额
-            hmm_state: 当前HMM状态ID (可选)
-        
-        Returns:
-            (triggered, reason): 是否触发平仓及原因
+        规则:
+        1. 显式TP价格检查
+        2. 百分比TP兜底
+        3. 硬止损
+        4. 时间防御 (可选)
+        5. 盈利翻转逃逸
         """
-        triggered, reason = False, ""
         pos_size = position_data['size']
         entry_price = position_data['entry_price']
         entry_time = position_data['entry_time']
@@ -71,7 +57,7 @@ class RiskManager:
         current_equity_pnl = raw_pnl_pct * Config.MAX_LEVERAGE
 
         # ================================================================
-        # 1. 显式TP价格检查 (基于trader.py设置的TP价格)
+        # 1. 显式TP价格检查
         # ================================================================
         if pos_size > 0:
             if current_price >= tp:
@@ -80,19 +66,19 @@ class RiskManager:
             if current_price <= tp:
                 return True, "💰 TP"
         
-        # 2. 百分比TP兜底 (防止TP价格计算错误时的保护)
+        # 2. 百分比TP兜底
         if raw_pnl_pct >= Config.MIN_TP_DISTANCE:
             return True, f"💰 TP({Config.MIN_TP_DISTANCE*100:.2f}%)"
 
         # ================================================================
-        # 2. 硬止损: 0.6% 价格反向波动 (本金亏损约12%)
+        # 3. 硬止损
         # ================================================================
-        sl_distance = getattr(Config, 'MAX_SL_DISTANCE', 0.006)
+        sl_distance = Config.MAX_SL_DISTANCE
         if raw_pnl_pct <= -sl_distance:
             return True, f"🛑 SL({sl_distance*100:.1f}%)"
 
         # ================================================================
-        # 3. 时间防御 (仅在开关启用时生效)
+        # 4. 时间防御 (仅在开关启用时生效)
         # ================================================================
         if self.time_defense_enabled:
             for time_min, loss_limit in self.time_defense_rules:
@@ -100,7 +86,7 @@ class RiskManager:
                     return True, f"⏳ TimeDef({int(duration_min)}m)"
 
         # ================================================================
-        # 4. 盈利翻转逃逸机制
+        # 5. 盈利翻转逃逸机制
         # ================================================================
         if flips_count >= Config.BAILOUT_ON_NTH_FLIP:
             if flips_count == 1:
@@ -113,34 +99,6 @@ class RiskManager:
                 if raw_pnl_pct > 0:
                     return True, f"🏃 Bailout(Flip{flips_count},AnyProfit)"
 
-        return False, ""
-
-    def check_hmm_forced_exit(self, state_id, position_size):
-        """
-        检查HMM状态是否需要强制平仓
-        
-        Args:
-            state_id: 当前HMM状态
-            position_size: 当前持仓 (正=多, 负=空)
-        
-        Returns:
-            (should_exit, reason): 是否需要平仓及原因
-        """
-        if position_size == 0:
-            return False, ""
-        
-        # State 2: 震荡 - 强制平掉所有持仓
-        if state_id == 2:
-            return True, "State 2 震荡 - 强制平仓"
-        
-        # State 0: 大跌 - 平掉多单
-        if state_id == 0 and position_size > 0:
-            return True, "State 0 大跌 - 平多单"
-        
-        # State 4: 大涨 - 平掉空单
-        if state_id == 4 and position_size < 0:
-            return True, "State 4 大涨 - 平空单"
-        
         return False, ""
 
     def activate_circuit_breaker(self, net_pnl, margin_used, now_ms=None):

@@ -1,3 +1,1 @@
-from .hmm_engine import HMMStateEngine
-
-__all__ = ['HMMStateEngine']
+# Models package (currently unused - HMM removed)

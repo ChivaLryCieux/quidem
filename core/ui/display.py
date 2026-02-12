@@ -82,7 +82,7 @@ class DisplayManager:
         )
         print(display_str)
 
-    def update_status(self, pos, regime, color, pnl, price, cluster_id=5, macd=0.0, bb_dist=0.0, st_val=0.0):
+    def update_status(self, pos, regime, color, pnl, price, macd=0.0, bb_dist=0.0, st_val=0.0):
         """
         实时刷新状态栏
         显示: MACD柱状图 | 布林带中轨 | SuperTrend值 | 价格 | PnL

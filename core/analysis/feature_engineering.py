@@ -10,16 +10,12 @@ from core.analysis.indicators import (
 
 class FeatureEngineer:
     """
-    负责从原始K线数据中提取HMM模型所需的特征。
+    负责从原始K线数据中提取技术指标特征。
     
-    新版本：计算7类特征用于HMM状态分类
-    1. 相对成交量 Vol/MA(Vol,96)
-    2. 对数动量 (1,10,50,96)
-    3. 滚动标准差 (5,50,96)
-    4. 归一化MACD/Close
-    5. 价格与布林带中轨距离
-    6. 二值化SuperTrend方向
-    7. K与D差值 (KDJ)
+    计算指标:
+    1. 相对成交量, 动量, 波动率
+    2. MACD, 布林带, SuperTrend
+    3. KDJ, ADX, VWAP
     """
     def __init__(self):
         # HMM特征计算器
@@ -41,12 +37,10 @@ class FeatureEngineer:
 
     def calculate_features(self, history_df, curr_price, btc_change_pct=0.0, obi_value=0.0):
         """
-        计算HMM特征矩阵和交易信号特征
+        计算技术指标特征
         
         :param history_df: 需要包含 'close', 'high', 'low', 'open', 'volume', 'taker_buy'
         :param curr_price: 当前价格
-        :param btc_change_pct: BTC变化百分比（保留参数以兼容，但不使用）
-        :param obi_value: 订单簿失衡值（保留参数以兼容，但不使用）
         :return: (features_array, context_dict)
         """
         if len(history_df) < 100:  # 需要足够历史数据
@@ -142,12 +136,8 @@ class FeatureEngineer:
         rsi = MathUtils.calc_rsi(history_df['close']).iloc[-1]
         atr = MathUtils.calc_atr(history_df).iloc[-1]
         
-        # 构建context（HMM和风险管理使用）
+        # 构建context（策略信号和风险管理使用）
         context = {
-            # HMM 特征
-            'hmm_features': hmm_features,
-            'features': hmm_features,  # 兼容性别名
-            
             # 价格信息
             'price': curr_price,
             
@@ -205,7 +195,7 @@ class FeatureEngineer:
         return hmm_features, context
 
     def get_feature_names(self):
-        """获取HMM特征名称列表"""
+        """获取特征名称列表"""
         return [
             'relative_volume',
             'log_mom_1', 'log_mom_10', 'log_mom_50', 'log_mom_96',

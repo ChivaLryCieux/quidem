@@ -182,11 +182,6 @@ class QuantBot:
         btc_chg = (btc_price - self.last_btc_price) / self.last_btc_price if self.last_btc_price > 0 else 0.0
         self.last_btc_price = btc_price
 
-        # 3. OBI
-        obi = 0.0
-        if book:
-            obi, _ = self.brain.state_machine.ob_analyzer.analyze(book)
-
         # 4. Ingest to Brain (5m for signals, 15m for trend filter)
         if self.current_candle_timestamp != 0 and timestamp > self.current_candle_timestamp:
             logger.info(f"[Candle Close] {self.current_candle_timestamp} -> {timestamp}")
@@ -194,10 +189,10 @@ class QuantBot:
 
         # Ingest 15m for trend filtering
         if c_15m:
-            self.brain.ingest_candle(c_15m, '15m', btc_change_pct=btc_chg, obi_value=obi)
+            self.brain.ingest_candle(c_15m, '15m', btc_change_pct=btc_chg)
         
         # Ingest 5m for signal generation
-        self.brain.ingest_candle(c_5m, '5m', btc_change_pct=btc_chg, obi_value=obi)
+        self.brain.ingest_candle(c_5m, '5m', btc_change_pct=btc_chg)
 
         # 5. Analyze
         analysis = self.brain.analyze(book) if book else None
@@ -219,29 +214,37 @@ class QuantBot:
         pos = self.trader.position
         unrealized = (price - pos['entry_price']) * pos['size'] if pos['size'] != 0 else 0
         
-        # Update UI with MACD, BB middle, SuperTrend
+        # Update UI with MACD, BB distance, SuperTrend
         if analysis:
-            cluster = analysis.get('cluster', (99, 0.0))[0]
             macd_hist = analysis.get('macd_histogram', 0.0)
             bb_dist = analysis.get('bb_distance', 0.0)
             st_val = analysis.get('supertrend_value', 0.0)
             self.ui.update_status(
                 pos['size'], self.brain.state, self.brain.color,
-                unrealized, price, cluster,
+                unrealized, price,
                 macd=macd_hist, bb_dist=bb_dist, st_val=st_val
             )
 
     def _send_heartbeat(self, price, analysis):
         if not (Config.ENABLE_MAIL_REPORT and self.redis_client): return
         try:
+            # 计算24h涨跌幅 (从5m历史中取288根前的价格)
+            change_24h = 0.0
+            hist = self.brain.history_5m
+            if len(hist) >= 288:
+                price_24h_ago = float(hist.iloc[-288]['close'])
+                change_24h = (price - price_24h_ago) / price_24h_ago * 100
+            elif len(hist) > 1:
+                price_first = float(hist.iloc[0]['close'])
+                change_24h = (price - price_first) / price_first * 100
+            
             data = {
                 "timestamp": int(time.time() * 1000),
                 "balance": self.trader.balance,
                 "position_size": self.trader.position['size'],
                 "price": price,
                 "regime": self.brain.state,
-                "cluster": analysis.get('cluster', (99, 0.0))[0] if analysis else 99,
-                "hf_signal": analysis.get('hf_signal', 0.0) if analysis else 0.0
+                "change_24h": round(change_24h, 2),
             }
             self.redis_client.set('bot_status_heartbeat', json.dumps(data), ex=10)
         except Exception:

@@ -14,9 +14,8 @@ sys.path.append(root)
 from core.utils.reporting import ReportService
 from core.config.settings import Config
 
-# Configurations (Should ideally be in Config, but kept here for now as in original)
+# Configurations
 MAIL_FROM = "CTA q-bot <report@abyssalfish.top>"
-# You might want to move these to Config.SETTINGS_MAIL_TO if appropriate
 MAIL_TO = getattr(Config, "MAIL_TO", ["3433551710@qq.com", "2874575651@qq.com", "2129325064@qq.com"])
 RESEND_API_KEY = getattr(Config, "RESEND_API_KEY", "re_39zFrC4s_KhUDNyHg8ZFRR8LkXg8cN8Ry")
 
@@ -26,8 +25,12 @@ logger = logging.getLogger("ReportRunner")
 
 service = ReportService()
 
-# 状态映射字典
-STATE_NAMES = {0: "大跌", 1: "弱跌", 2: "震荡", 3: "弱涨", 4: "大涨", 99: "初始"}
+def _format_change(change_pct):
+    """格式化24h涨跌幅"""
+    if change_pct >= 0:
+        return f"📈 +{change_pct:.2f}%"
+    else:
+        return f"📉 {change_pct:.2f}%"
 
 def job():
     logger.info("Starting Report Job...")
@@ -45,11 +48,17 @@ def job():
             trades.append(json.loads(item))
         except: pass
     
+    # 获取24h涨跌幅
+    hb_raw = r.get('bot_status_heartbeat')
+    status = json.loads(hb_raw) if hb_raw else None
+    change_24h = status.get('change_24h', 0.0) if status else 0.0
+    change_str = _format_change(change_24h)
+    
     # 2. Generate and Send
     try:
         if trades:
             logger.info(f"Generating report for {len(trades)} trades...")
-            html = service.generate_trade_report_html(trades)
+            html = service.generate_trade_report_html(trades, change_24h=change_24h)
             csv_path, csv_name = service.create_csv_export(trades)
             
             # Read CSV bytes
@@ -58,14 +67,9 @@ def job():
                 with open(csv_path, 'rb') as f:
                     csv_content = list(f.read())
             
-            # 获取当前状态
-            last_trade = trades[-1]
-            current_state_id = last_trade.get('cluster', 99)
-            current_state_name = STATE_NAMES.get(current_state_id, "未知")
-            
             params = {
                 "from": MAIL_FROM, "to": MAIL_TO,
-                "subject": f"📊 [Report] CTA q-bot | {len(trades)} Trades | 状态: {current_state_name}",
+                "subject": f"📊 [Report] CTA q-bot | {len(trades)} Trades | 24h: {change_str}",
                 "html": html,
                 "attachments": [{"filename": csv_name, "content": csv_content}] if csv_content else []
             }
@@ -73,19 +77,13 @@ def job():
             logger.info("Trade Report Sent.")
         else:
             logger.info("No trades. Checking heartbeat...")
-            hb_raw = r.get('bot_status_heartbeat')
-            status = json.loads(hb_raw) if hb_raw else None
             
             html = service.generate_heartbeat_html(status)
             bal = status.get('balance', 0) if status else 0
             
-            # 获取当前状态
-            current_state_id = status.get('cluster', 99) if status else 99
-            current_state_name = STATE_NAMES.get(current_state_id, "未知")
-            
             params = {
                 "from": MAIL_FROM, "to": MAIL_TO,
-                "subject": f"😴 [Silence] CTA q-bot | Bal: ${bal:.2f} | 状态: {current_state_name}",
+                "subject": f"😴 [Silence] CTA q-bot | Bal: ${bal:.2f} | 24h: {change_str}",
                 "html": html
             }
             resend.Emails.send(params)
@@ -104,7 +102,6 @@ schedule.every().day.at("23:00").do(job)
 if __name__ == "__main__":
     print(">>> Report Runner Started")
     print(f"Target Emails: {MAIL_TO}")
-    # Run once on start for testing? No, just loop.
     
     while True:
         schedule.run_pending()

@@ -3,8 +3,8 @@
 
 负责:
 1. 接收和处理K线数据 (5m + 15m 双周期)
-2. 计算HMM特征和技术指标
-3. 调用HMM引擎预测市场状态
+2. 计算技术指标
+3. 基于ADX/VWAP/MACD/ST/KDJ的趋势状态判断
 4. 协调信号生成
 """
 
@@ -13,7 +13,6 @@ import pandas as pd
 import logging
 from colorama import Fore, Style
 
-from core.models.hmm_engine import HMMStateEngine
 from core.strategy.analyzers import OrderBookAnalyzer, StateMachine
 from core.analysis.feature_engineering import FeatureEngineer
 from core.analysis.indicators import SuperTrend, BollingerBands
@@ -28,11 +27,10 @@ class StrategyBrain:
     def __init__(self):
         self.feature_engineer = FeatureEngineer()
         self.state_machine = StateMachine()
-        self.hmm_engine = HMMStateEngine()
-        self.state = self.state_machine.state
-        self.color = self.state_machine.color
+        self.state = "⏳ 等待"
+        self.color = Fore.WHITE
         
-        # 5m K线历史数据 (用于信号生成和HMM)
+        # 5m K线历史数据 (用于信号生成)
         self.history_5m = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'taker_buy'])
         
         # 15m K线历史数据 (用于趋势过滤)
@@ -63,7 +61,7 @@ class StrategyBrain:
                                columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'taker_buy'])
         
         if timeframe in ['5m', '1m']:
-            # 5m 数据用于信号生成和HMM
+            # 5m 数据用于信号生成
             if self.history_5m.empty:
                 self.history_5m = new_row
             else:
@@ -90,10 +88,10 @@ class StrategyBrain:
 
     def analyze(self, orderbook=None):
         """
-        分析市场状态
+        分析市场状态 (基于技术指标)
         
         Returns:
-            feature_data: 包含HMM状态、技术指标等的字典
+            feature_data: 包含技术指标的字典
         """
         feature_data = self.cached_analysis_data
         if not feature_data:
@@ -104,22 +102,29 @@ class StrategyBrain:
         feature_data['obi'] = obi
         feature_data['spread_pct'] = spread_pct
 
-        # 使用HMM状态预测 (新接口)
-        state_id, state_confidence = self.hmm_engine.predict_state(
-            context=feature_data
-        )
-        feature_data['cluster'] = (state_id, state_confidence)
-
-        # 根据HMM状态设置显示状态和颜色
-        state_map = {
-            0: ("📉 大跌", Fore.RED),
-            1: ("📉 小跌", Fore.LIGHTRED_EX),
-            2: ("🦀 震荡", Fore.YELLOW),
-            3: ("📈 小涨", Fore.LIGHTGREEN_EX),
-            4: ("📈 大涨", Fore.GREEN),
-            99: ("⏳ 初始", Fore.WHITE)
-        }
-        self.state, self.color = state_map.get(state_id, ("❓ 未知", Fore.WHITE))
+        # 根据ADX和VWAP判断市场状态
+        adx = feature_data.get('adx', 0)
+        vwap_dist = feature_data.get('vwap_distance', 0)
+        plus_di = feature_data.get('plus_di', 0)
+        minus_di = feature_data.get('minus_di', 0)
+        
+        if adx < 20:
+            self.state = "🦀 震荡"
+            self.color = Fore.YELLOW
+        elif plus_di > minus_di:
+            if adx > 30:
+                self.state = "📈 强涨"
+                self.color = Fore.GREEN
+            else:
+                self.state = "📈 小涨"
+                self.color = Fore.LIGHTGREEN_EX
+        else:
+            if adx > 30:
+                self.state = "📉 强跌"
+                self.color = Fore.RED
+            else:
+                self.state = "📉 小跌"
+                self.color = Fore.LIGHTRED_EX
 
         return feature_data
 

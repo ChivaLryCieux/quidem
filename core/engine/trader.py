@@ -131,7 +131,6 @@ class TradeExecutor:
     def _attempt_entry(self, data, price, funding_rate, timestamp):
         sig, lev = self.brain.get_entry_signal(data, price)
         regime = self.brain.state
-        cluster_id = data.get('cluster', (99, 0.0))[0]
 
         if sig != 0:
             is_risky, fr_msg = self.risk.check_funding_rate_risk(sig, funding_rate)
@@ -159,7 +158,6 @@ class TradeExecutor:
                         'entry_time': time.time() * 1000,
                         'sl': price - sl_dist if sig == 1 else price + sl_dist,
                         'tp': price + tp_dist if sig == 1 else price - tp_dist,
-                        'cluster': cluster_id
                     }
 
                     self.ui.log_entry(
