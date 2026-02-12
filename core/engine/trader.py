@@ -71,21 +71,12 @@ class TradeExecutor:
                 logger.info(f"🔒 移动止损→保本 | PnL={raw_pnl_pct*100:.2f}%")
 
         # ============================================================
-        # MACD 信号止盈 (Appel规则: 反向交叉时锁定利润)
+        # MACD 信号止盈 — 已禁用
+        # 5m 图上交叉过于频繁，导致过早止盈 ($0.04-$0.14)
+        # 改为完全依赖 TP 1.2% + 移动止损保本
         # ============================================================
-        analysis = self.brain.analyze()
-        if analysis and raw_pnl_pct > Config.FEE_BUFFER_PCT:
-            # 做多时标准MACD死叉 → 止盈
-            if pos['size'] > 0 and analysis.get('macd_death_cross', False):
-                logger.info(f"📊 MACD死叉止盈 | PnL={raw_pnl_pct*100:.2f}%")
-                self.execute_exit("📊 MACD死叉止盈", curr_price, funding_rate)
-                return
-            # 做空时快速MACD金叉 → 止盈
-            if pos['size'] < 0 and analysis.get('fast_macd_golden_cross', False):
-                logger.info(f"📊 MACD金叉止盈 | PnL={raw_pnl_pct*100:.2f}%")
-                self.execute_exit("📊 MACD金叉止盈", curr_price, funding_rate)
-                return
 
+        analysis = self.brain.analyze()
         atr = analysis.get('atr', 0.0) if analysis else 0.0
 
         # Check Exit (TP/SL/时间防御)
