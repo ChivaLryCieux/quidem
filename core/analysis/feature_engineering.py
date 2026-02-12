@@ -27,7 +27,8 @@ class FeatureEngineer:
         # 技术指标计算器
         self.bollinger = BollingerBands(period=20, std_mult=2.0)
         self.supertrend = SuperTrend(atr_period=10, multiplier=3.0)
-        self.macd = MACDCalculator(fast=12, slow=26, signal=9)
+        self.macd = MACDCalculator(fast=12, slow=26, signal=9)       # 标准MACD (卖出用)
+        self.macd_fast = MACDCalculator(fast=8, slow=17, signal=9)   # 快速MACD (买入用) - Appel
         self.kdj = KDJCalculator(k_period=9, d_period=3, j_smooth=3)
         self.adx = ADXCalculator(period=14)
         self.vwap = VWAPCalculator(period=288)
@@ -79,6 +80,7 @@ class FeatureEngineer:
         # 4. 归一化MACD/Close
         # ================================================================
         macd_result = self.macd.calculate(history_df)
+        fast_macd_result = self.macd_fast.calculate(history_df)  # Appel快速MACD
         macd_normalized = macd_result['normalized']
         
         # ================================================================
@@ -155,11 +157,26 @@ class FeatureEngineer:
             'supertrend_value': st_result['value'],
             'supertrend_direction': supertrend_direction,
             
-            # MACD
+            # MACD标准 (12,26,9)
             'macd': macd_result['macd'],
             'macd_signal': macd_result['signal'],
             'macd_histogram': macd_result['histogram'],
             'macd_normalized': macd_normalized,
+            'macd_golden_cross': macd_result['golden_cross'],
+            'macd_death_cross': macd_result['death_cross'],
+            'macd_above_zero': macd_result['above_zero'],
+            'macd_hist_turning_up': macd_result['hist_turning_up'],
+            'macd_hist_turning_down': macd_result['hist_turning_down'],
+            'macd_bullish_divergence': macd_result['bullish_divergence'],
+            'macd_bearish_divergence': macd_result['bearish_divergence'],
+            
+            # MACD快速 (8,17,9) - Appel买入专用
+            'fast_macd': fast_macd_result['macd'],
+            'fast_macd_histogram': fast_macd_result['histogram'],
+            'fast_macd_golden_cross': fast_macd_result['golden_cross'],
+            'fast_macd_death_cross': fast_macd_result['death_cross'],
+            'fast_macd_above_zero': fast_macd_result['above_zero'],
+            'fast_macd_hist_turning_up': fast_macd_result['hist_turning_up'],
             
             # KDJ
             'kdj_k': kdj_result['k'],

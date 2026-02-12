@@ -1,10 +1,10 @@
 """
-策略分析器 - ADX+VWAP三层过滤版本
+策略分析器 - ADX+VWAP+Appel黄金规则
 
 三层过滤逻辑：
   Layer 1: ADX趋势强度过滤 → ADX < 20 禁止开仓
   Layer 2: VWAP方向确认 → 价格>VWAP偏多，价格<VWAP偏空
-  Layer 3: 技术指标入场触发 → MACD/KDJ/SuperTrend确认
+  Layer 3: Appel黄金规则入场 → 双MACD交叉/零线/直方图转折/背离
 """
 
 import numpy as np
@@ -122,55 +122,83 @@ class StateMachine:
             return 0, lev
 
         # ================================================================
-        # Layer 3: 入场触发信号
+        # Layer 3: Appel 黄金规则入场触发
         # ================================================================
         sig = 0
         
-        # ------ 做多信号 ------
+        # 获取 Appel 信号
+        # 快速 MACD (8,17,9) — 买入专用
+        fast_golden = analysis_data.get('fast_macd_golden_cross', False)
+        fast_above_zero = analysis_data.get('fast_macd_above_zero', False)
+        fast_hist_up = analysis_data.get('fast_macd_hist_turning_up', False)
+        
+        # 标准 MACD (12,26,9) — 卖出专用 + 背离
+        std_death = analysis_data.get('macd_death_cross', False)
+        std_above_zero = analysis_data.get('macd_above_zero', False)
+        std_hist_down = analysis_data.get('macd_hist_turning_down', False)
+        std_hist_up = analysis_data.get('macd_hist_turning_up', False)
+        bullish_div = analysis_data.get('macd_bullish_divergence', False)
+        bearish_div = analysis_data.get('macd_bearish_divergence', False)
+        
+        supertrend_5m = analysis_data.get('supertrend_direction', 0)
+        supertrend_15m = self.supertrend_15m_direction
+        
+        # ------ 做多信号 (快MACD 8,17) ------
         if vwap_bias == 1:
-            # 信号A: MACD柱正 + SuperTrend绿 + KDJ不超买 (趋势确认)
-            if macd_histogram > 0 and supertrend_5m == 1 and kdj_k < 70:
+            # 信号A: 快MACD金叉 + 零线上方 + ST绿 (Appel趋势做多)
+            if fast_golden and fast_above_zero and supertrend_5m == 1:
                 sig = 1
                 logger.info(
-                    f"✅ [趋势多]MACD+ST | ADX={adx:.1f}, VWAP_d={vwap_distance:.2f}, "
-                    f"Hist={macd_histogram:.5f}, K={kdj_k:.1f}")
+                    f"✅ [Appel多A] 快MACD金叉+零线上 | ADX={adx:.1f}, VWAP_d={vwap_distance:.2f}, "
+                    f"ST5={supertrend_5m}")
             
-            # 信号B: 回调至VWAP附近做多 (VWAP回测)
-            elif -0.1 < vwap_distance < 0.1 and kdj_k < 40 and supertrend_15m == 1:
+            # 信号B: 直方图转折向上 + KDJ不超买 (Appel动量做多)
+            elif (fast_hist_up or std_hist_up) and kdj_k < 55 and supertrend_5m == 1:
                 sig = 1
                 logger.info(
-                    f"✅ [回调多]VWAP回测 | ADX={adx:.1f}, VWAP_d={vwap_distance:.2f}, "
-                    f"K={kdj_k:.1f}, ST15={supertrend_15m}")
+                    f"✅ [Appel多B] 直方图转折↑ | ADX={adx:.1f}, K={kdj_k:.1f}, "
+                    f"FastHist↑={fast_hist_up}, StdHist↑={std_hist_up}")
             
-            # 信号C: 强趋势 + 双SuperTrend一致 (高信心)
+            # 信号C: 看涨背离 + ADX>25 (Appel反转做多)
+            elif bullish_div and adx > 25 and kdj_k < 40:
+                sig = 1
+                logger.info(
+                    f"✅ [Appel多C] 看涨背离 | ADX={adx:.1f}, K={kdj_k:.1f}")
+            
+            # 信号D: 强趋势 + 双ST一致 (原有高信心信号保留)
             elif adx > self.ADX_STRONG and supertrend_5m == 1 and supertrend_15m == 1:
                 if bb_distance < 0.5 and kdj_k < 65:
                     sig = 1
                     logger.info(
-                        f"✅ [强势多]双ST | ADX={adx:.1f}, BB={bb_distance:.2f}, K={kdj_k:.1f}")
+                        f"✅ [强势多] 双ST | ADX={adx:.1f}, BB={bb_distance:.2f}, K={kdj_k:.1f}")
         
-        # ------ 做空信号 ------
+        # ------ 做空信号 (标准MACD 12,26) ------
         elif vwap_bias == -1:
-            # 信号A: MACD柱负 + SuperTrend红 + KDJ不超卖 (趋势确认)
-            if macd_histogram < 0 and supertrend_5m == -1 and kdj_k > 30:
+            # 信号A: 标准MACD死叉 + 零线下方 + ST红 (Appel趋势做空)
+            if std_death and not std_above_zero and supertrend_5m == -1:
                 sig = -1
                 logger.info(
-                    f"✅ [趋势空]MACD+ST | ADX={adx:.1f}, VWAP_d={vwap_distance:.2f}, "
-                    f"Hist={macd_histogram:.5f}, K={kdj_k:.1f}")
+                    f"✅ [Appel空A] 标准MACD死叉+零线下 | ADX={adx:.1f}, VWAP_d={vwap_distance:.2f}, "
+                    f"ST5={supertrend_5m}")
             
-            # 信号B: 反弹至VWAP附近做空 (VWAP回测)
-            elif -0.1 < vwap_distance < 0.1 and kdj_k > 60 and supertrend_15m == -1:
+            # 信号B: 直方图转折向下 + KDJ不超卖 (Appel动量做空)
+            elif std_hist_down and kdj_k > 45 and supertrend_5m == -1:
                 sig = -1
                 logger.info(
-                    f"✅ [反弹空]VWAP回测 | ADX={adx:.1f}, VWAP_d={vwap_distance:.2f}, "
-                    f"K={kdj_k:.1f}, ST15={supertrend_15m}")
+                    f"✅ [Appel空B] 直方图转折↓ | ADX={adx:.1f}, K={kdj_k:.1f}")
             
-            # 信号C: 强趋势 + 双SuperTrend一致 (高信心)
+            # 信号C: 看跌背离 + ADX>25 (Appel反转做空)
+            elif bearish_div and adx > 25 and kdj_k > 60:
+                sig = -1
+                logger.info(
+                    f"✅ [Appel空C] 看跌背离 | ADX={adx:.1f}, K={kdj_k:.1f}")
+            
+            # 信号D: 强趋势 + 双ST一致 (原有高信心信号保留)
             elif adx > self.ADX_STRONG and supertrend_5m == -1 and supertrend_15m == -1:
                 if bb_distance > -0.5 and kdj_k > 35:
                     sig = -1
                     logger.info(
-                        f"✅ [强势空]双ST | ADX={adx:.1f}, BB={bb_distance:.2f}, K={kdj_k:.1f}")
+                        f"✅ [强势空] 双ST | ADX={adx:.1f}, BB={bb_distance:.2f}, K={kdj_k:.1f}")
 
         if sig != 0:
             self.bars_since_last_trade = 0

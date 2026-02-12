@@ -232,7 +232,7 @@ class SuperTrend:
 
 
 class MACDCalculator:
-    """MACD指标 (12, 26, 9)"""
+    """MACD指标 - 支持Appel黄金规则"""
     
     def __init__(self, fast=12, slow=26, signal=9):
         self.fast = fast
@@ -241,12 +241,17 @@ class MACDCalculator:
     
     def calculate(self, df):
         """
-        计算MACD
-        Returns: (macd, signal, histogram, normalized)
-            macd: MACD线 (快线-慢线)
-            signal: 信号线
-            histogram: 柱状图
-            normalized: 归一化MACD (MACD/Close)
+        计算MACD + Appel黄金规则信号
+        
+        Returns dict:
+            macd/signal/histogram/normalized: 基础值
+            golden_cross: 金叉 (MACD上穿信号线)
+            death_cross: 死叉 (MACD下穿信号线)
+            above_zero: MACD在零线上方
+            hist_turning_up: 直方图从谷底回升 (连续2根下降后回升)
+            hist_turning_down: 直方图从峰值回落 (连续2根上升后回落)
+            bullish_divergence: 看涨背离 (价格新低但直方图未新低)
+            bearish_divergence: 看跌背离 (价格新高但直方图未新高)
         """
         close = df['close']
         
@@ -254,26 +259,79 @@ class MACDCalculator:
         ema_slow = close.ewm(span=self.slow, adjust=False).mean()
         
         macd = ema_fast - ema_slow
-        signal = macd.ewm(span=self.signal, adjust=False).mean()
-        histogram = macd - signal
+        signal_line = macd.ewm(span=self.signal, adjust=False).mean()
+        histogram = macd - signal_line
         
         # 归一化: MACD / Close
         normalized = macd / close.replace(0, np.nan)
         normalized = normalized.fillna(0)
         
+        n = len(macd)
+        
+        # === 信号线交叉 (金叉/死叉) ===
+        golden_cross = False
+        death_cross = False
+        if n >= 2:
+            prev_diff = float(macd.iloc[-2] - signal_line.iloc[-2])
+            curr_diff = float(macd.iloc[-1] - signal_line.iloc[-1])
+            golden_cross = (prev_diff <= 0 and curr_diff > 0)
+            death_cross = (prev_diff >= 0 and curr_diff < 0)
+        
+        # === 零线位置 ===
+        above_zero = float(macd.iloc[-1]) > 0 if n > 0 else False
+        
+        # === 直方图转折 ===
+        hist_turning_up = False
+        hist_turning_down = False
+        if n >= 3:
+            h1 = float(histogram.iloc[-3])
+            h2 = float(histogram.iloc[-2])
+            h3 = float(histogram.iloc[-1])
+            # 转折向上: 前两根下降(h1>h2)，当前回升(h3>h2)
+            hist_turning_up = (h1 > h2 and h3 > h2)
+            # 转折向下: 前两根上升(h1<h2)，当前回落(h3<h2)
+            hist_turning_down = (h1 < h2 and h3 < h2)
+        
+        # === 背离检测 (近20根K线) ===
+        bullish_divergence = False
+        bearish_divergence = False
+        lookback = min(20, n - 1)
+        if lookback >= 5:
+            recent_close = close.iloc[-lookback:].values
+            recent_hist = histogram.iloc[-lookback:].values
+            
+            # 看涨背离: 价格创近期新低，但直方图未创新低
+            price_at_new_low = recent_close[-1] <= np.min(recent_close)
+            hist_not_new_low = recent_hist[-1] > np.min(recent_hist[:-1])
+            bullish_divergence = (price_at_new_low and hist_not_new_low)
+            
+            # 看跌背离: 价格创近期新高，但直方图未创新高
+            price_at_new_high = recent_close[-1] >= np.max(recent_close)
+            hist_not_new_high = recent_hist[-1] < np.max(recent_hist[:-1])
+            bearish_divergence = (price_at_new_high and hist_not_new_high)
+        
         return {
-            'macd': macd.iloc[-1] if len(macd) > 0 else 0.0,
-            'signal': signal.iloc[-1] if len(signal) > 0 else 0.0,
-            'histogram': histogram.iloc[-1] if len(histogram) > 0 else 0.0,
-            'normalized': normalized.iloc[-1] if len(normalized) > 0 else 0.0,
+            'macd': float(macd.iloc[-1]) if n > 0 else 0.0,
+            'signal': float(signal_line.iloc[-1]) if n > 0 else 0.0,
+            'histogram': float(histogram.iloc[-1]) if n > 0 else 0.0,
+            'normalized': float(normalized.iloc[-1]) if n > 0 else 0.0,
             'macd_series': macd,
-            'signal_series': signal
+            'signal_series': signal_line,
+            # Appel 黄金规则信号
+            'golden_cross': golden_cross,
+            'death_cross': death_cross,
+            'above_zero': above_zero,
+            'hist_turning_up': hist_turning_up,
+            'hist_turning_down': hist_turning_down,
+            'bullish_divergence': bullish_divergence,
+            'bearish_divergence': bearish_divergence,
         }
     
     def get_latest(self, df):
         """获取最新的MACD值"""
         result = self.calculate(df)
         return result['macd'], result['signal'], result['histogram'], result['normalized']
+
 
 
 class KDJCalculator:
