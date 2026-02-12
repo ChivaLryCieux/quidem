@@ -37,9 +37,9 @@ class Config:
     BAILOUT_ON_NTH_FLIP = 99  # 基本禁用flip平仓，只靠TP/SL
     FEE_BUFFER_PCT = 0.0012
     MIN_ATR_PCT = 0.0020
-    MIN_TP_DISTANCE = 0.006   # 止盈目标：0.6%价格波动 (10x杠杆=6%本金)
-    MAX_SL_DISTANCE = 0.005   # 硬止损：0.5%价格反向 (10x杠杆=5%本金)
-    # 盈亏比 1.2:1，55%胜率即可盈利，但给价格足够波动空间
+    MIN_TP_DISTANCE = 0.012   # 止盈目标：1.2%价格波动 (10x杠杆=12%本金)
+    MAX_SL_DISTANCE = 0.004   # 硬止损：0.4%价格反向 (10x杠杆=4%本金)
+    # 盈亏比 3:1，30%胜率即可打平，60%胜率大幅盈利
 
     # 微观结构
     OBI_THRESHOLD_TREND = -0.2

@@ -46,33 +46,11 @@ class TradeExecutor:
                 })
                 self.last_snapshot_time = now
 
-        # 2. HMM 状态强制平仓逻辑（优先级最高）
-        if analysis_data and self.position['size'] != 0:
-            state_id = analysis_data.get('cluster', (99, 0.0))[0]
-            
-            # State 2: 震荡/噪音 - 强制平掉所有持仓
-            if state_id == 2:
-                logger.warning(f"⚠️ State 2 震荡检测 - 强制平仓")
-                self.execute_exit("State 2 震荡 - 强制平仓", curr_price, funding_rate)
-                return
-            
-            # State 0: 大跌 - 如果持有多单，强制平仓
-            if state_id == 0 and self.position['size'] > 0:
-                logger.warning(f"⚠️ State 0 大跌检测 - 强制平多单")
-                self.execute_exit("State 0 大跌 - 平多单", curr_price, funding_rate)
-                return
-            
-            # State 4: 大涨 - 如果持有空单，强制平仓
-            if state_id == 4 and self.position['size'] < 0:
-                logger.warning(f"⚠️ State 4 大涨检测 - 强制平空单")
-                self.execute_exit("State 4 大涨 - 平空单", curr_price, funding_rate)
-                return
-
-        # 3. 持仓管理
+        # 2. 持仓管理
         if self.position['size'] != 0:
             self._manage_position(curr_price, funding_rate)
 
-        # 4. 开仓逻辑
+        # 3. 开仓逻辑
         self._check_entry(analysis_data, curr_price, funding_rate, timestamp)
 
 
@@ -80,29 +58,37 @@ class TradeExecutor:
         pos = self.position
         raw_pnl_pct = (curr_price - pos['entry_price']) / pos['entry_price'] * (1 if pos['size'] > 0 else -1)
 
-        is_prof = raw_pnl_pct > Config.FEE_BUFFER_PCT
-        if not self.was_in_profit and is_prof: self.profit_flip_count += 1
-        self.was_in_profit = is_prof
+        # ============================================================
+        # 移动止损: 盈利达0.6%时，SL移至入场价(保本)
+        # ============================================================
+        breakeven_threshold = 0.006  # 0.6%
+        if raw_pnl_pct >= breakeven_threshold:
+            if pos['size'] > 0 and pos['sl'] < pos['entry_price']:
+                pos['sl'] = pos['entry_price']
+                logger.info(f"🔒 移动止损→保本 | PnL={raw_pnl_pct*100:.2f}%")
+            elif pos['size'] < 0 and pos['sl'] > pos['entry_price']:
+                pos['sl'] = pos['entry_price']
+                logger.info(f"🔒 移动止损→保本 | PnL={raw_pnl_pct*100:.2f}%")
 
+        # ============================================================
+        # MACD 信号止盈 (Appel规则: 反向交叉时锁定利润)
+        # ============================================================
         analysis = self.brain.analyze()
+        if analysis and raw_pnl_pct > Config.FEE_BUFFER_PCT:
+            # 做多时标准MACD死叉 → 止盈
+            if pos['size'] > 0 and analysis.get('macd_death_cross', False):
+                logger.info(f"📊 MACD死叉止盈 | PnL={raw_pnl_pct*100:.2f}%")
+                self.execute_exit("📊 MACD死叉止盈", curr_price, funding_rate)
+                return
+            # 做空时快速MACD金叉 → 止盈
+            if pos['size'] < 0 and analysis.get('fast_macd_golden_cross', False):
+                logger.info(f"📊 MACD金叉止盈 | PnL={raw_pnl_pct*100:.2f}%")
+                self.execute_exit("📊 MACD金叉止盈", curr_price, funding_rate)
+                return
+
         atr = analysis.get('atr', 0.0) if analysis else 0.0
 
-        # Trailing TP (更温和的追踪止盈)
-        if self.profit_flip_count >= 1:
-            original_tp_distance = pos['entry_price'] * Config.MIN_TP_DISTANCE
-            if self.profit_flip_count == 1:
-                adj_dist = original_tp_distance  # 100% 距离
-            elif self.profit_flip_count == 2:
-                adj_dist = original_tp_distance * 0.75  # 75% 距离
-            elif self.profit_flip_count >= 3:
-                adj_dist = original_tp_distance * 0.5  # 50% 距离 (不再设为0)
-
-            if pos['size'] > 0:
-                pos['tp'] = pos['entry_price'] + adj_dist
-            else:
-                pos['tp'] = pos['entry_price'] - adj_dist
-
-        # Check Exit
+        # Check Exit (TP/SL/时间防御)
         should_exit, reason = self.risk.check_exit_conditions(
             pos, curr_price, time.time() * 1000, self.profit_flip_count, atr, self.balance
         )
