@@ -22,6 +22,7 @@ class TradeExecutor:
         
         self.profit_flip_count = 0
         self.was_in_profit = False
+        self.max_pnl_pct = 0.0  # 追踪持仓期间最高盈利百分比
         self.trade_snapshots = []
         self.last_snapshot_time = 0
         self.last_traded_candle_timestamp = 0
@@ -58,23 +59,32 @@ class TradeExecutor:
         pos = self.position
         raw_pnl_pct = (curr_price - pos['entry_price']) / pos['entry_price'] * (1 if pos['size'] > 0 else -1)
 
-        # ============================================================
-        # 移动止损: 盈利达0.6%时，SL移至入场价(保本)
-        # ============================================================
-        breakeven_threshold = 0.006  # 0.6%
-        if raw_pnl_pct >= breakeven_threshold:
-            if pos['size'] > 0 and pos['sl'] < pos['entry_price']:
-                pos['sl'] = pos['entry_price']
-                logger.info(f"🔒 移动止损→保本 | PnL={raw_pnl_pct*100:.2f}%")
-            elif pos['size'] < 0 and pos['sl'] > pos['entry_price']:
-                pos['sl'] = pos['entry_price']
-                logger.info(f"🔒 移动止损→保本 | PnL={raw_pnl_pct*100:.2f}%")
+        # 更新历史最高盈利
+        if raw_pnl_pct > self.max_pnl_pct:
+            self.max_pnl_pct = raw_pnl_pct
 
         # ============================================================
-        # MACD 信号止盈 — 已禁用
-        # 5m 图上交叉过于频繁，导致过早止盈 ($0.04-$0.14)
-        # 改为完全依赖 TP 1.2% + 移动止损保本
+        # 追踪止损: 盈利>0.3%后，SL跟踪最高盈利的50%
+        # 例: 峰值+0.6% → SL在+0.3%, 反转到+0.3%时止盈
         # ============================================================
+        TRAIL_ACTIVATE = 0.003   # 0.3% 激活追踪
+        TRAIL_LOCK_RATIO = 0.50  # 锁定最高盈利的50%
+
+        if self.max_pnl_pct >= TRAIL_ACTIVATE:
+            locked_pnl = self.max_pnl_pct * TRAIL_LOCK_RATIO
+            trail_sl_price = pos['entry_price'] * (1 + locked_pnl) if pos['size'] > 0 else pos['entry_price'] * (1 - locked_pnl)
+            
+            # 只向有利方向移动SL，永远不会回退
+            if pos['size'] > 0 and trail_sl_price > pos['sl']:
+                old_sl = pos['sl']
+                pos['sl'] = trail_sl_price
+                if old_sl < pos['entry_price']:
+                    logger.info(f"🔒 追踪止损激活 | Peak={self.max_pnl_pct*100:.2f}% → SL锁定+{locked_pnl*100:.2f}%")
+            elif pos['size'] < 0 and trail_sl_price < pos['sl']:
+                old_sl = pos['sl']
+                pos['sl'] = trail_sl_price
+                if old_sl > pos['entry_price']:
+                    logger.info(f"🔒 追踪止损激活 | Peak={self.max_pnl_pct*100:.2f}% → SL锁定+{locked_pnl*100:.2f}%")
 
         analysis = self.brain.analyze()
         atr = analysis.get('atr', 0.0) if analysis else 0.0
@@ -145,6 +155,7 @@ class TradeExecutor:
                         st_val=data.get('supertrend_value', 0.0)
                     )
                     self.profit_flip_count, self.was_in_profit = 0, False
+                    self.max_pnl_pct = 0.0
 
     def execute_exit(self, reason, price, funding_rate=0.0):
         pos_size = self.position['size']
@@ -158,6 +169,7 @@ class TradeExecutor:
             net_pnl = raw_pnl - fee
 
             self.balance += net_pnl
+            self.max_pnl_pct = 0.0  # 重置追踪
             margin_used = abs(pos_size) * entry / Config.MAX_LEVERAGE
             cd_hrs, cd_msg = self.risk.activate_circuit_breaker(net_pnl, margin_used)
 

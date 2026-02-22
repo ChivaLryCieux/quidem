@@ -182,33 +182,48 @@ class QuantBot:
         btc_chg = (btc_price - self.last_btc_price) / self.last_btc_price if self.last_btc_price > 0 else 0.0
         self.last_btc_price = btc_price
 
-        # 4. Ingest to Brain (5m for signals, 15m for trend filter)
-        if self.current_candle_timestamp != 0 and timestamp > self.current_candle_timestamp:
+        # ============================================================
+        # 每个 tick: 持仓管理 (TP/SL/移动止损)
+        # ============================================================
+        if self.trader.position['size'] != 0:
+            self.trader.tick(curr_price, fr, None, timestamp)
+
+        # ============================================================
+        # 仅 K 线收盘时: 计算指标 + 判断入场信号
+        # ============================================================
+        is_new_candle = (self.current_candle_timestamp != 0 and timestamp > self.current_candle_timestamp)
+        
+        if is_new_candle:
             logger.info(f"[Candle Close] {self.current_candle_timestamp} -> {timestamp}")
             self.current_candle_timestamp = timestamp
 
-        # Ingest 15m for trend filtering
-        if c_15m:
-            self.brain.ingest_candle(c_15m, '15m', btc_change_pct=btc_chg)
+            # Ingest 已收盘的 K 线数据
+            if c_15m:
+                self.brain.ingest_candle(c_15m, '15m', btc_change_pct=btc_chg)
+            self.brain.ingest_candle(c_5m, '5m', btc_change_pct=btc_chg)
+
+            # 计算指标 (基于收盘价，稳定可靠)
+            analysis = self.brain.analyze(book) if book else None
+            
+            # 入场判断 (仅在无持仓时)
+            if self.trader.position['size'] == 0 and analysis:
+                self.trader.tick(curr_price, fr, analysis, timestamp)
+
+            # UI + Heartbeat
+            self._update_ui(curr_price, analysis)
+            self._send_heartbeat(curr_price, analysis)
+            if analysis:
+                self.last_tick_analysis = analysis
         
-        # Ingest 5m for signal generation
-        self.brain.ingest_candle(c_5m, '5m', btc_change_pct=btc_chg)
-
-        # 5. Analyze
-        analysis = self.brain.analyze(book) if book else None
-        
-        # 6. Trade Execution (Delegated)
-        self.trader.tick(curr_price, fr, analysis, timestamp)
-
-        # 7. UI Update
-        self._update_ui(curr_price, analysis)
-
-        # 8. Heartbeat
-        self._send_heartbeat(curr_price, analysis)
-
-        # 9. Cache State
-        if analysis:
-            self.last_tick_analysis = analysis
+        elif self.current_candle_timestamp == 0:
+            # 首次 tick，初始化 candle timestamp
+            self.current_candle_timestamp = timestamp
+            if c_15m:
+                self.brain.ingest_candle(c_15m, '15m', btc_change_pct=btc_chg)
+            self.brain.ingest_candle(c_5m, '5m', btc_change_pct=btc_chg)
+        else:
+            # 非收盘 tick: 只更新 UI 价格显示
+            self._update_ui(curr_price, self.last_tick_analysis)
 
     def _update_ui(self, price, analysis):
         pos = self.trader.position
