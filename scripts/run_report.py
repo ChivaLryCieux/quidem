@@ -16,7 +16,7 @@ from core.config.settings import Config
 
 # Configurations
 MAIL_FROM = "CTA q-bot <report@abyssalfish.top>"
-MAIL_TO = getattr(Config, "MAIL_TO", ["3433551710@qq.com", "2874575651@qq.com", "2129325064@qq.com"])
+MAIL_TO = getattr(Config, "MAIL_TO", ["3433551710@qq.com", "2874575651@qq.com"])
 RESEND_API_KEY = getattr(Config, "RESEND_API_KEY", "re_39zFrC4s_KhUDNyHg8ZFRR8LkXg8cN8Ry")
 
 resend.api_key = RESEND_API_KEY

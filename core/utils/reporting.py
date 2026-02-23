@@ -203,7 +203,7 @@ class ReportService:
             {change_badge}
             {('<img src="'+equity_img+'" style="width:100%;border:1px solid #eee;border-radius:5px;margin-bottom:20px;">' if equity_img else '')}
             <table>
-                <thead><tr><th>Time</th><th>Action</th><th>PnL</th><th>Trend</th><th>Exit</th></tr></thead>
+                <thead><tr><th>EntryTime</th><th>Action</th><th>PnL</th><th>Trend</th><th>Exit</th></tr></thead>
                 <tbody>{rows}</tbody>
             </table>
         </body>

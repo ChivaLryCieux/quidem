@@ -64,10 +64,23 @@ class TradeExecutor:
             self.max_pnl_pct = raw_pnl_pct
 
         # ============================================================
-        # 追踪止损: 盈利>0.3%后，SL跟踪最高盈利的50%
+        # 保本底线: 盈利曾超过0.2%，SL移至入场价（这笔交易不许亏）
+        # ============================================================
+        BREAKEVEN_ACTIVATE = 0.002  # 0.2%
+
+        if self.max_pnl_pct >= BREAKEVEN_ACTIVATE:
+            if pos['size'] > 0 and pos['sl'] < pos['entry_price']:
+                pos['sl'] = pos['entry_price']
+                logger.info(f"🛡️ 保本锁定 | Peak={self.max_pnl_pct*100:.2f}% → SL=入场价")
+            elif pos['size'] < 0 and pos['sl'] > pos['entry_price']:
+                pos['sl'] = pos['entry_price']
+                logger.info(f"🛡️ 保本锁定 | Peak={self.max_pnl_pct*100:.2f}% → SL=入场价")
+
+        # ============================================================
+        # 追踪止损: 盈利>0.4%后，SL跟踪最高盈利的50%
         # 例: 峰值+0.6% → SL在+0.3%, 反转到+0.3%时止盈
         # ============================================================
-        TRAIL_ACTIVATE = 0.003   # 0.3% 激活追踪
+        TRAIL_ACTIVATE = 0.004   # 0.4% 激活追踪
         TRAIL_LOCK_RATIO = 0.50  # 锁定最高盈利的50%
 
         if self.max_pnl_pct >= TRAIL_ACTIVATE:
@@ -78,12 +91,12 @@ class TradeExecutor:
             if pos['size'] > 0 and trail_sl_price > pos['sl']:
                 old_sl = pos['sl']
                 pos['sl'] = trail_sl_price
-                if old_sl < pos['entry_price']:
+                if old_sl <= pos['entry_price']:
                     logger.info(f"🔒 追踪止损激活 | Peak={self.max_pnl_pct*100:.2f}% → SL锁定+{locked_pnl*100:.2f}%")
             elif pos['size'] < 0 and trail_sl_price < pos['sl']:
                 old_sl = pos['sl']
                 pos['sl'] = trail_sl_price
-                if old_sl > pos['entry_price']:
+                if old_sl >= pos['entry_price']:
                     logger.info(f"🔒 追踪止损激活 | Peak={self.max_pnl_pct*100:.2f}% → SL锁定+{locked_pnl*100:.2f}%")
 
         analysis = self.brain.analyze()
