@@ -82,11 +82,8 @@ class DisplayManager:
         )
         print(display_str)
 
-    def update_status(self, pos, regime, color, pnl, price, macd=0.0, bb_dist=0.0, st_val=0.0):
-        """
-        实时刷新状态栏
-        显示: MACD柱状图 | 布林带中轨 | SuperTrend值 | 价格 | PnL
-        """
+    def update_status(self, pos, regime, color, pnl, price, macd=0.0, adx=0.0, reversal=0.0):
+        """实时刷新状态栏，展示最重要的三个指标：MACD/ADX/反转因子。"""
         regime = regime if regime else "N/A"
         color = color if color else ""
 
@@ -94,16 +91,13 @@ class DisplayManager:
         pnl_c = Fore.GREEN if pnl >= 0 else Fore.RED
         macd_c = Fore.GREEN if macd >= 0 else Fore.RED
         
-        # SuperTrend方向标记
-        st_dir = "▲" if st_val > 0 and st_val < price else "▼"
-
         info_str = (
             f"\r\033[K"
             f"{status_icon} "
             f"{color}{regime:<8}{Style.RESET_ALL} | "
             f"MACD:{macd_c}{macd:>+8.4f}{Style.RESET_ALL} | "
-            f"BB:{bb_dist:>+5.2f} | "
-            f"ST{st_dir}:{st_val:<8.2f} | "
+            f"ADX:{adx:>5.1f} | "
+            f"REV:{reversal:>+5.2f} | "
             f"P:{price:<8.4f} | "
             f"{pnl_c}${pnl:>+7.2f}{Style.RESET_ALL}"
         )

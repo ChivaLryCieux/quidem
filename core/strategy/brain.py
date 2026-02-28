@@ -8,14 +8,13 @@
 4. 协调信号生成
 """
 
-import numpy as np
 import pandas as pd
 import logging
-from colorama import Fore, Style
+from colorama import Fore
 
-from core.strategy.analyzers import OrderBookAnalyzer, StateMachine
+from core.strategy.analyzers import SignalEngine
 from core.analysis.feature_engineering import FeatureEngineer
-from core.analysis.indicators import SuperTrend, BollingerBands
+from core.analysis.indicators import SuperTrend
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ class StrategyBrain:
 
     def __init__(self):
         self.feature_engineer = FeatureEngineer()
-        self.state_machine = StateMachine()
+        self.signal_engine = SignalEngine()
         self.state = "⏳ 等待"
         self.color = Fore.WHITE
         
@@ -63,7 +62,7 @@ class StrategyBrain:
             
             # 计算5m特征
             if len(self.history_5m) >= 100:
-                features, context = self.feature_engineer.calculate_features(
+                _, context = self.feature_engineer.calculate_features(
                     self.history_5m, normalized[4], btc_change_pct, obi_value
                 )
                 self.cached_analysis_data = context
@@ -75,7 +74,7 @@ class StrategyBrain:
             # 计算15m SuperTrend
             if len(self.history_15m) >= 30:
                 st_result = self.supertrend_15m.calculate(self.history_15m)
-                self.state_machine.update_15m_supertrend(st_result['direction'])
+                self.signal_engine.update_15m_supertrend(st_result['direction'])
 
     def _normalize_candle(self, item):
         """将K线数据标准化为7字段。"""
@@ -101,7 +100,7 @@ class StrategyBrain:
             return None
 
         feature_data['orderbook'] = orderbook
-        obi, spread_pct = self.state_machine.ob_analyzer.analyze(orderbook)
+        obi, spread_pct = self.signal_engine.ob_analyzer.analyze(orderbook)
         feature_data['obi'] = obi
         feature_data['spread_pct'] = spread_pct
 
@@ -133,4 +132,4 @@ class StrategyBrain:
 
     def get_entry_signal(self, analysis_data, current_price):
         """获取入场信号"""
-        return self.state_machine.get_entry_signal(analysis_data, current_price)
+        return self.signal_engine.get_entry_signal(analysis_data, current_price)
