@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 # 策略大脑
 # ==========================================
 class StrategyBrain:
+    HISTORY_COLUMNS = ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'taker_buy']
+
     def __init__(self):
         self.feature_engineer = FeatureEngineer()
         self.state_machine = StateMachine()
@@ -31,10 +33,10 @@ class StrategyBrain:
         self.color = Fore.WHITE
         
         # 5m K线历史数据 (用于信号生成)
-        self.history_5m = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'taker_buy'])
+        self.history_5m = pd.DataFrame(columns=self.HISTORY_COLUMNS)
         
         # 15m K线历史数据 (用于趋势过滤)
-        self.history_15m = pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'taker_buy'])
+        self.history_15m = pd.DataFrame(columns=self.HISTORY_COLUMNS)
         
         # 缓存的分析数据
         self.cached_analysis_data = None
@@ -52,39 +54,40 @@ class StrategyBrain:
             btc_change_pct: BTC变化百分比 (保留兼容)
             obi_value: 订单簿失衡值 (保留兼容)
         """
-        # 标准化 item 长度
-        if len(item) == 6:
-            item = list(item) + [item[5] * 0.5]  # 添加 taker_buy
-        
-        timestamp, open_, high, low, close, vol, taker_buy_vol = item
-        new_row = pd.DataFrame([[timestamp, open_, high, low, close, vol, taker_buy_vol]],
-                               columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'taker_buy'])
+        normalized = self._normalize_candle(item)
+        new_row = pd.DataFrame([normalized], columns=self.HISTORY_COLUMNS)
         
         if timeframe in ['5m', '1m']:
             # 5m 数据用于信号生成
-            if self.history_5m.empty:
-                self.history_5m = new_row
-            else:
-                self.history_5m = pd.concat([self.history_5m, new_row]).iloc[-500:]
+            self.history_5m = self._append_history(self.history_5m, new_row, max_length=500)
             
             # 计算5m特征
             if len(self.history_5m) >= 100:
                 features, context = self.feature_engineer.calculate_features(
-                    self.history_5m, close, btc_change_pct, obi_value
+                    self.history_5m, normalized[4], btc_change_pct, obi_value
                 )
                 self.cached_analysis_data = context
         
         elif timeframe == '15m':
             # 15m 数据用于趋势过滤
-            if self.history_15m.empty:
-                self.history_15m = new_row
-            else:
-                self.history_15m = pd.concat([self.history_15m, new_row]).iloc[-200:]
+            self.history_15m = self._append_history(self.history_15m, new_row, max_length=200)
             
             # 计算15m SuperTrend
             if len(self.history_15m) >= 30:
                 st_result = self.supertrend_15m.calculate(self.history_15m)
                 self.state_machine.update_15m_supertrend(st_result['direction'])
+
+    def _normalize_candle(self, item):
+        """将K线数据标准化为7字段。"""
+        if len(item) == 6:
+            return list(item) + [item[5] * 0.5]
+        return list(item)
+
+    @staticmethod
+    def _append_history(history_df, new_row, max_length):
+        if history_df.empty:
+            return new_row
+        return pd.concat([history_df, new_row]).iloc[-max_length:]
 
     def analyze(self, orderbook=None):
         """
