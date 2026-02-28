@@ -160,7 +160,7 @@ class StrategyBacktesterUnified:
         return {
             'size': 0.0, 'entry_price': 0.0, 'sl': 0.0, 'tp': 0.0, 
             'entry_time': 0, 'last_funding_index': 0,
-            'entry_rsi': 0.0, 'entry_atr': 0.0, 'entry_regime': 'INIT', 'cluster': 5,
+            'entry_rsi': 0.0, 'entry_atr': 0.0, 'entry_regime': 'INIT',
             'leverage': 0.0
         }
 
@@ -183,7 +183,7 @@ class StrategyBacktesterUnified:
             'pnl': 0, 'fee': 0, 'balance': self.balance,
             'regime': 'BANKRUPTCY', 'reason': 'InjectOnLoss',
             'duration_min': 0, 'direction': 'NONE',
-            'entry_rsi': 0, 'exit_rsi': 0, 'entry_atr': 0, 'exit_atr': 0, 'flips': 0, 'cluster': 5
+            'entry_rsi': 0, 'exit_rsi': 0, 'entry_atr': 0, 'exit_atr': 0, 'flips': 0
         })
 
     def _apply_entry_slippage(self, sig, price):
@@ -212,13 +212,13 @@ class StrategyBacktesterUnified:
         atr_15m = analysis.get('atr', 0.0) if analysis else 0.0
         atr_1m = analysis.get('atr', 0.0) if analysis else 0.0
         curr_rsi = analysis.get('rsi', 50.0)
-        cluster_info = analysis.get('cluster', (99, 0))
+        reversal_factor = analysis.get('reversal_factor', 0.0) if analysis else 0.0
 
-        tp_dist = eprice * Config.MIN_TP_DISTANCE  # 止盈: 0.35% (简化，不依赖ATR)
-        sl_dist = eprice * Config.MAX_SL_DISTANCE   # 止损: 0.6% (盈亏比约1:1.7)
+        atr_scale = min(1.4, max(0.85, 1.0 + atr_1m * 18.0))
+        rev_scale = min(1.25, max(0.9, 1.0 + abs(reversal_factor) * 0.2))
+        tp_dist = eprice * Config.MIN_TP_DISTANCE * atr_scale * rev_scale
+        sl_dist = eprice * Config.MAX_SL_DISTANCE * atr_scale
 
-        risk_pct = float(getattr(Config, "RISK_APPETITE", 0.03))
-        risk_budget = max(0.0, usable_balance * risk_pct)
         # 每次只用 20% 资金开仓 (原98%导致单次亏损过大)
         position_size_pct = 0.20
         amt_by_margin = (usable_balance * position_size_pct) / ((1 / lev) + Config.TAKER_FEE_RATE) / price
@@ -237,7 +237,6 @@ class StrategyBacktesterUnified:
             'entry_rsi': curr_rsi,
             'entry_atr': atr_15m,
             'entry_regime': self.brain.state,
-            'cluster': cluster_info[0],
             'leverage': lev
         }
         self.snapshots = []
@@ -278,8 +277,9 @@ class StrategyBacktesterUnified:
             self.snapshots.append({'time': now_sec, 'price': price, 'pnl': pnl, 'regime': self.brain.state})
             self.last_snapshot_time = now_sec
 
+        reversal_factor = analysis.get('reversal_factor', 0.0) if analysis else 0.0
         should_exit, reason = self.risk.check_exit_conditions(
-            pos, price, current_time_ms, self.profit_flip_count, atr_1m, self.balance
+            pos, price, current_time_ms, self.profit_flip_count, atr_1m, self.balance, reversal_factor
         )
         if should_exit:
             self._execute_exit(reason, price, current_time_ms, analysis)
@@ -322,8 +322,7 @@ class StrategyBacktesterUnified:
             'exit_rsi': exit_rsi,
             'entry_atr': self.position.get('entry_atr', 0.0),
             'exit_atr': exit_atr,
-            'flips': self.profit_flip_count,
-            'cluster': self.position.get('cluster', 99)
+            'flips': self.profit_flip_count
         })
         
         self.snapshots = []
@@ -341,14 +340,14 @@ class StrategyBacktesterUnified:
         triggered, reason, exit_price = False, "", 0.0
         
         if pos['size'] > 0:
-            # if l <= pos['sl']:  # 止损已禁用
-            #     exit_price, reason, triggered = self._apply_exit_slippage("sell", pos['sl']), "🛑 SL (Intra)", True
-            if h >= pos['tp']:
+            if l <= pos['sl']:
+                exit_price, reason, triggered = self._apply_exit_slippage("sell", pos['sl']), "🛑 SL (Intra)", True
+            elif h >= pos['tp']:
                 exit_price, reason, triggered = self._apply_exit_slippage("sell", pos['tp']), "💰 TP (Intra)", True
         else:
-            # if h >= pos['sl']:  # 止损已禁用
-            #     exit_price, reason, triggered = self._apply_exit_slippage("buy", pos['sl']), "🛑 SL (Intra)", True
-            if l <= pos['tp']:
+            if h >= pos['sl']:
+                exit_price, reason, triggered = self._apply_exit_slippage("buy", pos['sl']), "🛑 SL (Intra)", True
+            elif l <= pos['tp']:
                 exit_price, reason, triggered = self._apply_exit_slippage("buy", pos['tp']), "💰 TP (Intra)", True
                 
         if triggered:
@@ -435,8 +434,8 @@ class StrategyBacktesterUnified:
         
         cols = {
             'Time': 'Time', 'action': 'Action', 'reason': 'Reason', 'direction': 'Direction',
-            'Duration_Str': 'Duration', 'regime': 'Entry_Regime', 
-            'flips': 'Flips', 'exit_price': 'Price', 'pnl': 'PnL', 'balance': 'Balance', 'cluster': 'Cluster'
+            'Duration_Str': 'Duration', 'regime': 'Entry_Regime',
+            'flips': 'Flips', 'exit_price': 'Price', 'pnl': 'PnL', 'balance': 'Balance'
         }
         
         out_df = pd.DataFrame()

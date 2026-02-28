@@ -233,8 +233,8 @@ class QuantBot:
             unrealized,
             price,
             macd=analysis.get('macd_histogram', 0.0),
-            bb_dist=analysis.get('bb_distance', 0.0),
-            st_val=analysis.get('supertrend_value', 0.0),
+            adx=analysis.get('adx', 0.0),
+            reversal=analysis.get('reversal_factor', 0.0),
         )
 
     def _send_heartbeat(self, price, analysis):

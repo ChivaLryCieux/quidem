@@ -77,6 +77,8 @@ class TradeExecutor:
         analysis = self.brain.analyze()
         atr = analysis.get('atr', 0.0) if analysis else 0.0
 
+        reversal_factor = analysis.get('reversal_factor', 0.0) if analysis else 0.0
+
         should_exit, reason = self.risk.check_exit_conditions(
             pos,
             curr_price,
@@ -84,6 +86,7 @@ class TradeExecutor:
             self.profit_flip_count,
             atr,
             self.balance,
+            reversal_factor,
         )
         if should_exit:
             self.execute_exit(reason, curr_price, funding_rate)
@@ -158,7 +161,7 @@ class TradeExecutor:
             return
 
         self.last_traded_candle_timestamp = timestamp
-        self.position = self._build_position(sig, amount, price)
+        self.position = self._build_position(sig, amount, price, data)
 
         self.ui.log_entry(
             regime,
@@ -179,9 +182,14 @@ class TradeExecutor:
         raw_amount = (self.balance * self.POSITION_ALLOC_RATIO) / ((1 / leverage) + Config.TAKER_FEE_RATE) / price
         return self.exchange.get_precision_amount(raw_amount, price)
 
-    def _build_position(self, signal, amount, price):
-        sl_dist = price * Config.MAX_SL_DISTANCE
-        tp_dist = price * Config.MIN_TP_DISTANCE
+    def _build_position(self, signal, amount, price, analysis_data):
+        atr = float(analysis_data.get('atr', 0.0)) if analysis_data else 0.0
+        reversal = float(analysis_data.get('reversal_factor', 0.0)) if analysis_data else 0.0
+
+        atr_scale = min(1.4, max(0.85, 1.0 + atr * 18.0))
+        rev_scale = min(1.25, max(0.9, 1.0 + abs(reversal) * 0.2))
+        sl_dist = price * Config.MAX_SL_DISTANCE * atr_scale
+        tp_dist = price * Config.MIN_TP_DISTANCE * atr_scale * rev_scale
         is_long = signal == 1
 
         return {

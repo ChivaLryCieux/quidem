@@ -34,7 +34,7 @@ class RiskManager:
             return True, f"费率过高不做空 ({funding_rate * 100:.4f}%)"
         return False, ""
 
-    def check_exit_conditions(self, position_data, current_price, current_time_ms, flips_count, atr=0.0, entry_balance=100.0):
+    def check_exit_conditions(self, position_data, current_price, current_time_ms, flips_count, atr=0.0, entry_balance=100.0, reversal_factor=0.0):
         """检查平仓条件。"""
         pos_size = position_data['size']
         entry_price = position_data['entry_price']
@@ -45,11 +45,11 @@ class RiskManager:
         duration_min = (current_time_ms - entry_time) / 60000.0
         current_equity_pnl = raw_pnl_pct * Config.MAX_LEVERAGE
 
-        should_exit, reason = self._check_take_profit(pos_size, tp, current_price, raw_pnl_pct)
+        should_exit, reason = self._check_take_profit(pos_size, tp, current_price, raw_pnl_pct, atr, reversal_factor)
         if should_exit:
             return True, reason
 
-        should_exit, reason = self._check_stop_loss(raw_pnl_pct)
+        should_exit, reason = self._check_stop_loss(raw_pnl_pct, atr, reversal_factor)
         if should_exit:
             return True, reason
 
@@ -68,20 +68,26 @@ class RiskManager:
         direction = 1 if pos_size > 0 else -1
         return (current_price - entry_price) / entry_price * direction
 
-    def _check_take_profit(self, pos_size, tp, current_price, raw_pnl_pct):
+    def _check_take_profit(self, pos_size, tp, current_price, raw_pnl_pct, atr, reversal_factor):
         if pos_size > 0 and current_price >= tp:
             return True, "💰 TP"
         if pos_size < 0 and current_price <= tp:
             return True, "💰 TP"
-        if raw_pnl_pct >= Config.MIN_TP_DISTANCE:
-            return True, f"💰 TP({Config.MIN_TP_DISTANCE*100:.2f}%)"
+
+        atr_scale = min(1.4, max(0.8, 1.0 + atr * 20.0))
+        reversal_boost = min(1.25, max(0.85, 1.0 + abs(reversal_factor) * 0.2))
+        tp_distance = Config.MIN_TP_DISTANCE * atr_scale * reversal_boost
+        if raw_pnl_pct >= tp_distance:
+            return True, f"💰 TP({tp_distance*100:.2f}%)"
         return False, ""
 
     @staticmethod
-    def _check_stop_loss(raw_pnl_pct):
-        sl_distance = Config.MAX_SL_DISTANCE
+    def _check_stop_loss(raw_pnl_pct, atr, reversal_factor):
+        atr_scale = min(1.3, max(0.85, 1.0 + atr * 12.0))
+        reversal_relax = min(1.2, max(0.9, 1.0 - abs(reversal_factor) * 0.1))
+        sl_distance = Config.MAX_SL_DISTANCE * atr_scale * reversal_relax
         if raw_pnl_pct <= -sl_distance:
-            return True, f"🛑 SL({sl_distance*100:.1f}%)"
+            return True, f"🛑 SL({sl_distance*100:.2f}%)"
         return False, ""
 
     def _check_time_defense(self, duration_min, current_equity_pnl):

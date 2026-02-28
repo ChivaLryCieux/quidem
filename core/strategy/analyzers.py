@@ -7,9 +7,8 @@
   Layer 3: Appel黄金规则入场 → 双MACD交叉/零线/直方图转折/背离
 """
 
-import numpy as np
 import logging
-from colorama import Fore, Style
+from colorama import Fore
 
 from core.config.settings import Config
 
@@ -33,8 +32,8 @@ class OrderBookAnalyzer:
         return obi, spread_pct
 
 
-class StateMachine:
-    """ADX+VWAP三层过滤策略"""
+class SignalEngine:
+    """纯技术指标+量化因子的短线信号引擎。"""
     
     # ADX阈值
     ADX_TREND = 20       # ADX > 20: 有趋势，可以开仓
@@ -44,7 +43,7 @@ class StateMachine:
         self.state, self.color = "INIT", Fore.WHITE
         self.ob_analyzer = OrderBookAnalyzer()
         self.supertrend_15m_direction = 0
-        self.bars_since_last_trade = 99  # 初始设为大值，允许首次交易
+        self.bars_since_last_trade = 99
 
     def update_15m_supertrend(self, direction):
         self.supertrend_15m_direction = direction
@@ -55,8 +54,8 @@ class StateMachine:
 
         self.bars_since_last_trade += 1
         
-        # 冷却期：至少间隔3根K线 (15分钟)
-        if self.bars_since_last_trade < 3:
+        # 冷却期：至少间隔2根K线，兼顾交易频率和信号质量
+        if self.bars_since_last_trade < 2:
             return 0, Config.DEFAULT_LEVERAGE
 
         spread_pct = analysis_data.get('spread_pct', 0.0)
@@ -72,15 +71,11 @@ class StateMachine:
         adx = analysis_data.get('adx', 0)
         plus_di = analysis_data.get('plus_di', 0)
         minus_di = analysis_data.get('minus_di', 0)
-        adx_rising = analysis_data.get('adx_rising', False)
-        
         vwap_distance = analysis_data.get('vwap_distance', 0)
         
         bb_distance = analysis_data.get('bb_distance', 0)
         kdj_k = analysis_data.get('kdj_k', 50)
-        macd_histogram = analysis_data.get('macd_histogram', 0)
-        supertrend_5m = analysis_data.get('supertrend_direction', 0)
-        supertrend_15m = self.supertrend_15m_direction
+        reversal_factor = analysis_data.get('reversal_factor', 0.0)
 
         # ================================================================
         # Layer 1: ADX 趋势强度过滤
@@ -160,13 +155,13 @@ class StateMachine:
                     f"FastHist↑={fast_hist_up}, StdHist↑={std_hist_up}")
             
             # 信号C: 看涨背离 + ADX>25 (Appel反转做多)
-            elif bullish_div and adx > 25 and kdj_k < 40:
+            elif bullish_div and adx > 23 and kdj_k < 45 and reversal_factor > 0.35:
                 sig = 1
                 logger.info(
-                    f"✅ [Appel多C] 看涨背离 | ADX={adx:.1f}, K={kdj_k:.1f}")
+                    f"✅ [Appel多C] 看涨背离反转 | ADX={adx:.1f}, K={kdj_k:.1f}, F={reversal_factor:.2f}")
             
             # 信号D: 强趋势 + 双ST一致 (原有高信心信号保留)
-            elif adx > self.ADX_STRONG and supertrend_5m == 1 and supertrend_15m == 1:
+            elif adx > self.ADX_STRONG and supertrend_5m == 1 and supertrend_15m == 1 and reversal_factor > 0.10:
                 if bb_distance < 0.5 and kdj_k < 65:
                     sig = 1
                     logger.info(
@@ -188,13 +183,13 @@ class StateMachine:
                     f"✅ [Appel空B] 直方图转折↓ | ADX={adx:.1f}, K={kdj_k:.1f}")
             
             # 信号C: 看跌背离 + ADX>25 (Appel反转做空)
-            elif bearish_div and adx > 25 and kdj_k > 60:
+            elif bearish_div and adx > 23 and kdj_k > 55 and reversal_factor < -0.35:
                 sig = -1
                 logger.info(
-                    f"✅ [Appel空C] 看跌背离 | ADX={adx:.1f}, K={kdj_k:.1f}")
+                    f"✅ [Appel空C] 看跌背离反转 | ADX={adx:.1f}, K={kdj_k:.1f}, F={reversal_factor:.2f}")
             
             # 信号D: 强趋势 + 双ST一致 (原有高信心信号保留)
-            elif adx > self.ADX_STRONG and supertrend_5m == -1 and supertrend_15m == -1:
+            elif adx > self.ADX_STRONG and supertrend_5m == -1 and supertrend_15m == -1 and reversal_factor < -0.10:
                 if bb_distance > -0.5 and kdj_k > 35:
                     sig = -1
                     logger.info(

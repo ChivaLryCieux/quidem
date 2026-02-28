@@ -18,7 +18,7 @@ class FeatureEngineer:
     3. KDJ, ADX, VWAP
     """
     def __init__(self):
-        # HMM特征计算器
+        # 统计因子计算器
         self.momentum_periods = [1, 10, 50, 96]
         self.volatility_periods = [5, 50, 96]
         self.momentum_calc = MomentumCalculator(periods=self.momentum_periods)
@@ -112,12 +112,12 @@ class FeatureEngineer:
         k_minus_d = kdj_result['k_minus_d']
         
         # ================================================================
-        # 构建HMM特征向量 (用于训练和推理)
+        # 构建量化特征向量（兼容返回）
         # ================================================================
         # 特征顺序:
-        # [relative_vol, mom_1, mom_10, mom_50, mom_96, vol_5, vol_50, vol_96, 
+        # [relative_vol, mom_1, mom_10, mom_50, mom_96, vol_5, vol_50, vol_96,
         #  macd_norm, bb_dist, st_dir, k_minus_d]
-        hmm_features = np.array([
+        tech_features = np.array([
             relative_volume,
             momentum_values.get('T_1', 0.0),
             momentum_values.get('T_10', 0.0),
@@ -132,6 +132,29 @@ class FeatureEngineer:
             k_minus_d
         ]).reshape(1, -1)
         
+        # ================================================================
+        # 顶/底背离反转因子（[-1,1]，>0偏多，<0偏空）
+        # ================================================================
+        reversal_raw = 0.0
+        if macd_result['bullish_divergence']:
+            reversal_raw += 0.55
+        if macd_result['bearish_divergence']:
+            reversal_raw -= 0.55
+
+        # 结合KDJ与布林位置增强拐点判定
+        if kdj_result['k'] < 25 and bb_distance < -0.45:
+            reversal_raw += 0.25
+        if kdj_result['k'] > 75 and bb_distance > 0.45:
+            reversal_raw -= 0.25
+
+        # 结合MACD柱动量转折
+        if macd_result['hist_turning_up']:
+            reversal_raw += 0.15
+        if macd_result['hist_turning_down']:
+            reversal_raw -= 0.15
+
+        reversal_factor = float(np.clip(reversal_raw, -1.0, 1.0))
+
         # ================================================================
         # 技术指标（风险管理和信号生成使用）
         # ================================================================
@@ -169,6 +192,7 @@ class FeatureEngineer:
             'macd_hist_turning_down': macd_result['hist_turning_down'],
             'macd_bullish_divergence': macd_result['bullish_divergence'],
             'macd_bearish_divergence': macd_result['bearish_divergence'],
+            'reversal_factor': reversal_factor,
             
             # MACD快速 (8,17,9) - Appel买入专用
             'fast_macd': fast_macd_result['macd'],
@@ -209,7 +233,7 @@ class FeatureEngineer:
             'obi': obi_value
         }
         
-        return hmm_features, context
+        return tech_features, context
 
     def get_feature_names(self):
         """获取特征名称列表"""
