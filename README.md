@@ -126,7 +126,9 @@ q-bot/
 ### 1. 环境配置
 
 ```bash
-pip install ccxt pandas numpy hmmlearn joblib colorama python-dotenv websocket-client redis matplotlib
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
+pip install -r requirements.txt
 ```
 
 在项目根目录创建 `.env` 文件：
@@ -134,7 +136,15 @@ pip install ccxt pandas numpy hmmlearn joblib colorama python-dotenv websocket-c
 ```env
 BINANCE_API_KEY=your_api_key
 BINANCE_SECRET=your_secret_key
+# 可选：邮件报告（仅在 ENABLE_MAIL_REPORT=True 时生效）
+RESEND_API_KEY=your_resend_api_key
+# 可选：自定义 Redis 连接（默认 localhost:6379/0）
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_DB=0
 ```
+
+> 注意：默认 `Config.ENABLE_MAIL_REPORT = False`，未开启邮件报告时不会连接 Redis 或调用邮件服务。
 
 ### 2. 训练 HMM 模型
 
@@ -171,9 +181,15 @@ python scripts/pretrain.py
 
 ```bash
 python run.py          # 交互式选择模式
-python run.py 1        # 直接进入模式1
-python run.py 2        # 直接进入模式2
+python run.py 1        # 直接进入模拟盘 (Paper)
+python run.py 2        # 直接进入实盘 (Live)
 ```
+
+交互式模式支持：
+
+- `0` 退出
+- `1` 模拟盘（推荐先验证策略）
+- `2` 实盘（需正确配置 Binance API）
 
 ### 6. 启动邮件报告 (可选)
 
@@ -238,6 +254,15 @@ FEE_BUFFER_PCT = 0.0012    # 手续费缓冲
 # 资金费率
 MAX_FUNDING_RATE_THRESHOLD = 0.0005  # 逆向费率阈值
 ```
+
+若你希望启用邮件报告，可额外关注以下参数：
+
+```python
+ENABLE_MAIL_REPORT = False
+```
+
+- `False`：不连接 Redis，不发送邮件。
+- `True`：会尝试连接 Redis，并由 `scripts/run_report.py` 发送定时邮件报告。
 
 策略信号阈值在 `core/strategy/analyzers.py`：
 
