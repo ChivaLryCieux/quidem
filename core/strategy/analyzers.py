@@ -38,6 +38,7 @@ class SignalEngine:
     # ADX阈值
     ADX_TREND = 20       # ADX > 20: 有趋势，可以开仓
     ADX_STRONG = 30      # ADX > 30: 强趋势，加大信心
+    ADX_CHOP_GUARD = 26  # 26以下容易在震荡里来回打脸，需更严格确认
     
     def __init__(self):
         self.state, self.color = "INIT", Fore.WHITE
@@ -54,8 +55,8 @@ class SignalEngine:
 
         self.bars_since_last_trade += 1
         
-        # 冷却期：至少间隔2根K线，兼顾交易频率和信号质量
-        if self.bars_since_last_trade < 2:
+        # 冷却期：至少间隔3根K线，避免震荡区间频繁追单
+        if self.bars_since_last_trade < 3:
             return 0, Config.DEFAULT_LEVERAGE
 
         spread_pct = analysis_data.get('spread_pct', 0.0)
@@ -116,6 +117,16 @@ class SignalEngine:
             logger.debug(f"⛔ VWAP/DI方向不明 | VWAP_d={vwap_distance:.2f}, +DI={plus_di:.1f}, -DI={minus_di:.1f}")
             return 0, lev
 
+        # 震荡保护：在低趋势+贴近VWAP的噪音区直接跳过，减少“刚开就回撤”
+        if adx < self.ADX_CHOP_GUARD and abs(vwap_distance) < 0.03:
+            logger.debug(f"⛔ ChopGuard | ADX={adx:.1f}, VWAP_d={vwap_distance:.3f}")
+            return 0, lev
+
+        # 中位K值噪音带过滤：45~55最容易来回假突破
+        if adx < self.ADX_CHOP_GUARD and 45 <= kdj_k <= 55:
+            logger.debug(f"⛔ KDJ噪音带过滤 | ADX={adx:.1f}, K={kdj_k:.1f}")
+            return 0, lev
+
         # ================================================================
         # Layer 3: Appel 黄金规则入场触发
         # ================================================================
@@ -148,7 +159,7 @@ class SignalEngine:
                     f"ST5={supertrend_5m}")
             
             # 信号B: 直方图转折向上 + KDJ不超买 (Appel动量做多)
-            elif (fast_hist_up or std_hist_up) and kdj_k < 55 and supertrend_5m == 1:
+            elif (fast_hist_up or std_hist_up) and kdj_k < 55 and supertrend_5m == 1 and (adx >= 24 or analysis_data.get('adx_rising', False)):
                 sig = 1
                 logger.info(
                     f"✅ [Appel多B] 直方图转折↑ | ADX={adx:.1f}, K={kdj_k:.1f}, "
@@ -177,7 +188,7 @@ class SignalEngine:
                     f"ST5={supertrend_5m}")
             
             # 信号B: 直方图转折向下 + KDJ不超卖 (Appel动量做空)
-            elif std_hist_down and kdj_k > 45 and supertrend_5m == -1:
+            elif std_hist_down and kdj_k > 45 and supertrend_5m == -1 and (adx >= 24 or analysis_data.get('adx_rising', False)):
                 sig = -1
                 logger.info(
                     f"✅ [Appel空B] 直方图转折↓ | ADX={adx:.1f}, K={kdj_k:.1f}")

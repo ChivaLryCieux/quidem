@@ -284,3 +284,34 @@ ADX_STRONG = 30    # ADX强趋势阈值
 - **回测复用**: 回测引擎直接复用 `core/` 的 `StrategyBrain` 和 `RiskManager`
 
 ---
+
+---
+
+## 🧪 针对“昨晚 23:00 后 5m 震荡亏损”的诊断与优化
+
+为复盘“昨晚 23:00 开始的 5m 震荡行情”新增了诊断脚本：
+
+```bash
+python backtest/replay_5m_diagnostics.py --since "2026-03-01 23:00" --hours 16 --symbol SOL/USDT
+```
+
+### 诊断脚本能力
+
+`backtest/replay_5m_diagnostics.py` 会：
+
+1. 拉取指定起点开始的 5m + 15m K线；
+2. 逐根重放现有策略信号；
+3. 记录触发时指标快照（ADX/VWAP/KDJ/SuperTrend 等）；
+4. 评估信号后续 N 根K线走势（MFE/MAE、TP/SL/Timeout、pnl%）；
+5. 输出 CSV 到 `backtest/outputs/`，用于定位“什么信号在震荡中最容易亏损”。
+
+### 本次针对性策略优化（避免震荡反复止损）
+
+在 `SignalEngine` 中加入了三类抗震荡约束：
+
+- **冷却加强**：开仓后至少等待 **3 根 5m K线**（由 2 提升到 3）。
+- **ChopGuard**：当 `ADX < 26` 且 `|VWAP距离| < 0.03%` 时禁止开仓（贴近均值的噪音区）。
+- **KDJ噪音带过滤**：当 `ADX < 26` 且 `KDJ-K∈[45,55]` 时禁止开仓（中值区假突破高发）。
+- **动量信号B收紧**：多空 B 类（柱体转折）要求 `ADX >= 24` 或 `ADX上升`，减少弱趋势下误触发。
+
+> 建议流程：先运行 `replay_5m_diagnostics.py` 查看该时段信号统计，再用 `backtest/backtester.py` 做同窗口前后对比，重点观察胜率、平均 MAE、SL 命中率。
