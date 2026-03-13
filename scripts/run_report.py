@@ -15,9 +15,9 @@ from core.utils.reporting import ReportService
 from core.config.settings import Config
 
 # Configurations
-MAIL_FROM = "CTA q-bot <report@abyssalfish.top>"
-MAIL_TO = getattr(Config, "MAIL_TO", ["3433551710@qq.com", "2874575651@qq.com"])
-RESEND_API_KEY = getattr(Config, "RESEND_API_KEY", "re_39zFrC4s_KhUDNyHg8ZFRR8LkXg8cN8Ry")
+MAIL_FROM = Config.MAIL_FROM
+MAIL_TO = Config.MAIL_TO
+RESEND_API_KEY = Config.RESEND_API_KEY
 
 resend.api_key = RESEND_API_KEY
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

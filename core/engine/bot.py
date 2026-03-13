@@ -10,6 +10,7 @@ from colorama import init
 from core.config.exchange import ExchangeService
 from core.config.settings import Config
 from core.engine.trader import TradeExecutor
+from core.engine.alert_manager import AlertManager
 from core.risk.manager import RiskManager
 from core.strategy.brain import StrategyBrain
 from core.ui.display import DisplayManager
@@ -51,6 +52,7 @@ class QuantBot:
         self.brain = StrategyBrain()
         self.risk = RiskManager()
         self.trader = TradeExecutor(self.exchange, self.risk, self.ui, self.brain)
+        self.alert_manager = AlertManager()
 
         self.redis_client = self._init_redis()
 
@@ -201,6 +203,7 @@ class QuantBot:
             self.trader.tick(curr_price, fr, analysis, timestamp)
 
         self._update_ui(curr_price, analysis)
+        self.alert_manager.check_and_alert(self.brain.history_5m, analysis)
         self._send_heartbeat(curr_price, analysis)
         if analysis:
             self.last_tick_analysis = analysis
