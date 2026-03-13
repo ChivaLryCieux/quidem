@@ -52,6 +52,9 @@ class Config:
 
     #邮件报告开关
     ENABLE_MAIL_REPORT = False
+    MAIL_FROM = os.getenv("MAIL_FROM", "CTA q-bot <report@abyssalfish.top>")
+    MAIL_TO = [addr.strip() for addr in os.getenv("MAIL_TO", "3433551710@qq.com,2874575651@qq.com").split(",") if addr.strip()]
+    RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 
     # 日志配置
     LOG_LEVEL = 'INFO'
