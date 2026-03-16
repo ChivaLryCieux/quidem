@@ -24,6 +24,7 @@ class MarketDataStreamer(threading.Thread):
             f"wss://fstream.binance.com/stream?streams="
             f"{symbol_lower}@kline_5m/"
             f"{symbol_lower}@kline_15m/"
+            f"{symbol_lower}@kline_1h/"
             f"{symbol_lower}@depth20@100ms/"
             f"{symbol_lower}@markPrice/"
             f"btcusdt@kline_1m"
@@ -34,6 +35,7 @@ class MarketDataStreamer(threading.Thread):
         self.data = {
             'kline_5m': None,
             'kline_15m': None,
+            'kline_1h': None,
             'orderbook': None,
             'funding_rate': 0.0,
             'btc_price': 0.0,
@@ -106,6 +108,8 @@ class MarketDataStreamer(threading.Thread):
                     updates['kline_5m'] = kline_data
                 elif 'kline_15m' in stream:
                     updates['kline_15m'] = kline_data
+                elif 'kline_1h' in stream:
+                    updates['kline_1h'] = kline_data
 
             # 2. 深度数据处理
             elif 'depth20' in stream:
@@ -127,6 +131,7 @@ class MarketDataStreamer(threading.Thread):
                 if not self.data['is_ready']:
                     if (self.data['kline_5m'] is not None and
                             self.data['kline_15m'] is not None and
+                            self.data['kline_1h'] is not None and
                             self.data['orderbook'] is not None):
                         self.data['is_ready'] = True
                         logger.info("Market Data Ready!")
@@ -241,26 +246,29 @@ class ExchangeService:
             ohlcv_5m = self.client.fetch_ohlcv(self.symbol, '5m', limit=limit)
             # 获取15分钟K线历史数据
             ohlcv_15m = self.client.fetch_ohlcv(self.symbol, '15m', limit=limit)
-            return {'5m': ohlcv_5m, '15m': ohlcv_15m}
+            # 获取1小时K线历史数据（刻时模型）
+            ohlcv_1h = self.client.fetch_ohlcv(self.symbol, '1h', limit=max(50, limit // 2))
+            return {'5m': ohlcv_5m, '15m': ohlcv_15m, '1h': ohlcv_1h}
         except Exception as e:
             logger.error(f"[History Fetch Error] {e}")
-            return {'5m': [], '15m': []}
+            return {'5m': [], '15m': [], '1h': []}
 
     def get_latest_data(self):
         """
         从 WebSocket 本地缓存读取数据
-        返回: (最新5m K线列表, 最新15m K线列表, 订单簿, 资金费率, BTC价格)
+        返回: (最新5m K线列表, 最新15m K线列表, 最新1h K线列表, 订单簿, 资金费率, BTC价格)
         """
         data = self.ws_streamer.get_latest()
 
         # 使用 .get 安全获取，防止初始化时的 KeyError
         kline_5m = data.get('kline_5m')
         kline_15m = data.get('kline_15m')
+        kline_1h = data.get('kline_1h')
         book = data.get('orderbook')
         funding = data.get('funding_rate', 0.0)
         btc_price = data.get('btc_price', 0.0)
 
-        return kline_5m, kline_15m, book, funding, btc_price
+        return kline_5m, kline_15m, kline_1h, book, funding, btc_price
 
     def get_precision_amount(self, amount, price):
         """将数量转换为交易所规定的精度"""

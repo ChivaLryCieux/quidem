@@ -44,10 +44,14 @@ class SignalEngine:
         self.state, self.color = "INIT", Fore.WHITE
         self.ob_analyzer = OrderBookAnalyzer()
         self.supertrend_15m_direction = 0
+        self.supertrend_1h_direction = 0
         self.bars_since_last_trade = 99
 
     def update_15m_supertrend(self, direction):
         self.supertrend_15m_direction = direction
+
+    def update_1h_supertrend(self, direction):
+        self.supertrend_1h_direction = direction
 
     def get_entry_signal(self, analysis_data, current_price):
         if not analysis_data: 
@@ -148,6 +152,13 @@ class SignalEngine:
         
         supertrend_5m = analysis_data.get('supertrend_direction', 0)
         supertrend_15m = self.supertrend_15m_direction
+        supertrend_1h = self.supertrend_1h_direction
+
+        # 刻时模型: 15m + 1h 结构一致性过滤
+        # 1) 1h 明确反向: 直接禁入，降低逆大周期回撤
+        # 2) 1h 未形成明确方向: 仅允许强趋势/强反转信号
+        long_conflict = supertrend_1h == -1
+        short_conflict = supertrend_1h == 1
         
         # ------ 做多信号 (快MACD 8,17) ------
         if vwap_bias == 1:
@@ -207,6 +218,24 @@ class SignalEngine:
                         f"✅ [强势空] 双ST | ADX={adx:.1f}, BB={bb_distance:.2f}, K={kdj_k:.1f}")
 
         if sig != 0:
+            if (sig == 1 and long_conflict) or (sig == -1 and short_conflict):
+                logger.info(
+                    f"⛔ [刻时模型] 1h方向冲突，放弃信号 | sig={sig}, ST15={supertrend_15m}, ST1H={supertrend_1h}"
+                )
+                return 0, lev
+
+            if supertrend_1h == 0 and adx < self.ADX_STRONG and abs(reversal_factor) < 0.35:
+                logger.debug(
+                    f"⛔ [刻时模型] 1h未确认且趋势不够强 | ADX={adx:.1f}, F={reversal_factor:.2f}"
+                )
+                return 0, lev
+
+            # 15m+1h同向时，小幅提升杠杆利用率；反之保持默认
+            if (sig == 1 and supertrend_15m == 1 and supertrend_1h == 1) or (
+                sig == -1 and supertrend_15m == -1 and supertrend_1h == -1
+            ):
+                lev = min(Config.MAX_LEVERAGE, lev * 1.1)
+
             self.bars_since_last_trade = 0
-        
+
         return sig, lev

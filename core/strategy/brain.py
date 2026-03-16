@@ -2,7 +2,7 @@
 策略大脑 - 核心策略控制器
 
 负责:
-1. 接收和处理K线数据 (5m + 15m 双周期)
+1. 接收和处理K线数据 (5m + 15m + 1h 刻时模型)
 2. 计算技术指标
 3. 基于ADX/VWAP/MACD/ST/KDJ的趋势状态判断
 4. 协调信号生成
@@ -36,12 +36,16 @@ class StrategyBrain:
         
         # 15m K线历史数据 (用于趋势过滤)
         self.history_15m = pd.DataFrame(columns=self.HISTORY_COLUMNS)
+
+        # 1h K线历史数据 (刻时模型: 宏观趋势确认)
+        self.history_1h = pd.DataFrame(columns=self.HISTORY_COLUMNS)
         
         # 缓存的分析数据
         self.cached_analysis_data = None
         
-        # 15m SuperTrend计算器
+        # 15m / 1h SuperTrend计算器
         self.supertrend_15m = SuperTrend(atr_period=10, multiplier=3.0)
+        self.supertrend_1h = SuperTrend(atr_period=10, multiplier=3.0)
 
     def ingest_candle(self, item, timeframe='5m', btc_change_pct=0.0, obi_value=0.0):
         """
@@ -49,7 +53,7 @@ class StrategyBrain:
         
         Args:
             item: K线数据 [timestamp, open, high, low, close, volume, taker_buy?]
-            timeframe: '5m' 或 '15m' 或 '1m'
+            timeframe: '5m' 或 '15m' 或 '1h' 或 '1m'
             btc_change_pct: BTC变化百分比 (保留兼容)
             obi_value: 订单簿失衡值 (保留兼容)
         """
@@ -75,6 +79,14 @@ class StrategyBrain:
             if len(self.history_15m) >= 30:
                 st_result = self.supertrend_15m.calculate(self.history_15m)
                 self.signal_engine.update_15m_supertrend(st_result['direction'])
+
+        elif timeframe == '1h':
+            # 1h 数据用于宏观方向确认（刻时模型）
+            self.history_1h = self._append_history(self.history_1h, new_row, max_length=120)
+
+            if len(self.history_1h) >= 30:
+                st_result = self.supertrend_1h.calculate(self.history_1h)
+                self.signal_engine.update_1h_supertrend(st_result['direction'])
 
     def _normalize_candle(self, item):
         """将K线数据标准化为7字段。"""

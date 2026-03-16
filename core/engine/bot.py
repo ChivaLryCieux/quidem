@@ -136,13 +136,15 @@ class QuantBot:
             data = self._fetch_warmup_data()
             candles_5m = data.get('5m', [])
             candles_15m = data.get('15m', [])
+            candles_1h = data.get('1h', [])
 
-            if not (candles_5m and candles_15m):
+            if not (candles_5m and candles_15m and candles_1h):
                 self.ui.log_msg("⚠️ Warmup Data Empty - Starting with minimal state", "warning")
                 return
 
             self._ingest_warmup_candles(candles_5m, '5m', step=20)
             self._ingest_warmup_candles(candles_15m, '15m', step=10)
+            self._ingest_warmup_candles(candles_1h, '1h', step=5)
             self.current_candle_timestamp = candles_5m[-1][0]
             self.ui.log_msg("✅ Warmup Complete", "success")
         except Exception as exc:
@@ -161,7 +163,7 @@ class QuantBot:
                     f"⚠️ Warmup timeout ({self.WARMUP_TIMEOUT_SECONDS}s). Continuing with empty data...",
                     "warning",
                 )
-                return {'5m': [], '15m': []}
+                return {'5m': [], '15m': [], '1h': []}
 
     def _ingest_warmup_candles(self, candles, timeframe, step):
         self.ui.log_msg(f"Processing {len(candles)} {timeframe} candles...", "info")
@@ -171,7 +173,7 @@ class QuantBot:
                 self.ui.log_msg(f"  Processed {index}/{len(candles)} {timeframe} candles", "info")
 
     def _tick(self):
-        c_5m, c_15m, book, fr, btc_price = self.exchange.get_latest_data()
+        c_5m, c_15m, c_1h, book, fr, btc_price = self.exchange.get_latest_data()
         if not c_5m:
             return
 
@@ -186,7 +188,7 @@ class QuantBot:
 
         if self.current_candle_timestamp == 0:
             self.current_candle_timestamp = timestamp
-            self._ingest_realtime_candles(c_5m, c_15m, btc_chg)
+            self._ingest_realtime_candles(c_5m, c_15m, c_1h, btc_chg)
             return
 
         is_new_candle = timestamp > self.current_candle_timestamp
@@ -196,7 +198,7 @@ class QuantBot:
 
         logger.info(f"[Candle Close] {self.current_candle_timestamp} -> {timestamp}")
         self.current_candle_timestamp = timestamp
-        self._ingest_realtime_candles(c_5m, c_15m, btc_chg)
+        self._ingest_realtime_candles(c_5m, c_15m, c_1h, btc_chg)
 
         analysis = self.brain.analyze(book) if book else None
         if self.trader.position['size'] == 0 and analysis:
@@ -217,9 +219,11 @@ class QuantBot:
         self.last_btc_price = btc_price
         return btc_change
 
-    def _ingest_realtime_candles(self, c_5m, c_15m, btc_chg):
+    def _ingest_realtime_candles(self, c_5m, c_15m, c_1h, btc_chg):
         if c_15m:
             self.brain.ingest_candle(c_15m, '15m', btc_change_pct=btc_chg)
+        if c_1h:
+            self.brain.ingest_candle(c_1h, '1h', btc_change_pct=btc_chg)
         self.brain.ingest_candle(c_5m, '5m', btc_change_pct=btc_chg)
 
     def _update_ui(self, price, analysis):
