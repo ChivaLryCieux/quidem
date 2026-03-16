@@ -81,12 +81,13 @@ class AlertManager:
         ts = datetime.fromtimestamp(int(last_row['timestamp']) / 1000).strftime('%Y-%m-%d %H:%M:%S')
         price = float(last_row['close'])
 
-        subject = f"{icon} KDJ-J值预警 | {label}"
+        subject = f"{icon} KDJ-J值预警 | {label} | ADX {adx:.2f} > {self.KDJ_ADX_FILTER}"
         html = (
             f"<h3>KDJ-J值触发预警</h3>"
             f"<p><b>状态:</b> {label}</p>"
             f"<p><b>J值:</b> {kdj_j:.2f}</p>"
             f"<p><b>ADX:</b> {adx:.2f}</p>"
+            f"<p><b>触发条件:</b> ADX>{self.KDJ_ADX_FILTER} 且 J值触及极值</p>"
             f"<p><b>时间:</b> {ts}</p>"
             f"<p><b>价格:</b> {price:.4f}</p>"
         )
