@@ -191,6 +191,37 @@ python scripts/run_report.py
 - **11:00 邮件**：额外包含基于 Binance 日线 (`1d`) 计算的技术指标快照（RSI/ATR/BB/MACD/KDJ/ADX/DI/VWAP 等）。
 - **23:00 邮件**：常规交易/心跳报告，不附加日线快照。
 
+### 6. 启动爆仓量邮件预警 (可选)
+
+在 `.env` 中配置：
+
+```env
+ENABLE_LIQUIDATION_ALERT=true
+ENABLE_MAIL_REPORT=true
+RESEND_API_KEY=your_resend_api_key
+MAIL_TO=foo@example.com,bar@example.com
+
+LIQUIDATION_ALERT_SYMBOL=SOLUSDT
+LIQUIDATION_ALERT_WINDOW_SEC=300
+LIQUIDATION_ALERT_THRESHOLD_USD=1000000
+LIQUIDATION_ALERT_POLL_INTERVAL_SEC=30
+LIQUIDATION_ALERT_COOLDOWN_SEC=900
+```
+
+运行：
+
+```bash
+python scripts/liquidation_alert.py
+```
+
+机制说明：
+
+- 周期性轮询 Binance 爆仓 API：`/fapi/v1/allForceOrders`。
+- 在短时间滑动窗口内累计爆仓名义价值（USD）。
+- 当窗口累计值超过阈值时，发送邮件预警。
+- 通过冷却时间避免重复告警轰炸。
+
+
 ---
 
 ## 📊 数据流
