@@ -12,6 +12,7 @@ class AlertManager:
     KDJ_J_OVERSOLD = 0
     KDJ_ADX_FILTER = 25
     ADX_ALERT_THRESHOLD = 75
+    MACD_CROSS_ADX_FILTER = 35
 
     def __init__(self):
         self.mail_service = MailService()
@@ -19,6 +20,7 @@ class AlertManager:
         self.last_bocpd_cp = None
         self.last_kdj_state = None
         self.adx_alert_active = False
+        self.last_macd_cross_state = None
 
     def check_and_alert(self, history_5m, analysis):
         if history_5m is None or history_5m.empty or analysis is None:
@@ -26,7 +28,59 @@ class AlertManager:
 
         self._check_bocpd_alert(history_5m)
         self._check_kdj_j_alert(history_5m, analysis)
+        self._check_macd_cross_alert(history_5m, analysis)
         self._check_adx_alert(history_5m, analysis)
+
+    def _check_macd_cross_alert(self, history_5m, analysis):
+        adx = float(analysis.get('adx', 0.0))
+        macd_golden_cross = bool(analysis.get('macd_golden_cross', False))
+        macd_death_cross = bool(analysis.get('macd_death_cross', False))
+        macd_above_zero = bool(analysis.get('macd_above_zero', False))
+        macd = float(analysis.get('macd', 0.0))
+        macd_signal = float(analysis.get('macd_signal', 0.0))
+
+        if adx <= self.MACD_CROSS_ADX_FILTER:
+            self.last_macd_cross_state = None
+            return
+
+        state = None
+        label = None
+        icon = None
+
+        if macd_golden_cross and macd_above_zero:
+            state = 'golden_above_zero'
+            label = '水上金叉'
+            icon = '🟢'
+        elif macd_death_cross and not macd_above_zero:
+            state = 'death_below_zero'
+            label = '水下死叉'
+            icon = '🔴'
+
+        if state is None:
+            self.last_macd_cross_state = None
+            return
+
+        if self.last_macd_cross_state == state:
+            return
+
+        last_row = history_5m.iloc[-1]
+        ts = datetime.fromtimestamp(int(last_row['timestamp']) / 1000).strftime('%Y-%m-%d %H:%M:%S')
+        price = float(last_row['close'])
+
+        subject = f"{icon} MACD交叉预警 | {label} | ADX {adx:.2f} > {self.MACD_CROSS_ADX_FILTER}"
+        html = (
+            f"<h3>MACD交叉触发预警</h3>"
+            f"<p><b>状态:</b> {label}</p>"
+            f"<p><b>MACD:</b> {macd:.6f}</p>"
+            f"<p><b>Signal:</b> {macd_signal:.6f}</p>"
+            f"<p><b>ADX:</b> {adx:.2f}</p>"
+            f"<p><b>触发条件:</b> ADX>{self.MACD_CROSS_ADX_FILTER} 且出现{label}</p>"
+            f"<p><b>时间:</b> {ts}</p>"
+            f"<p><b>价格:</b> {price:.4f}</p>"
+        )
+        self.mail_service.send_alert(subject, html)
+        self.last_macd_cross_state = state
+        logger.warning("MACD cross alert triggered: state=%s, adx=%.2f", state, adx)
 
     def _check_bocpd_alert(self, history_5m):
         cps = self.bocpd.detect_changepoints(history_5m['close'].values)
