@@ -1,7 +1,7 @@
 # ⚡ Q-Bot — SOL/USDT 短线 CTA 量化交易系统
 
 基于 **ADX + VWAP + Appel 黄金规则** 三层过滤的加密货币短线 CTA（Commodity Trading Advisor）系统。  
-支持 Binance 永续合约实时交易、历史回测、Redis 状态推送和邮件日报。
+支持 Binance 永续合约实时交易、历史回测、Redis 状态推送和邮件日报（含日线指标快照）。
 
 ---
 
@@ -80,10 +80,7 @@ q-bot/
 │   │
 │   ├── analysis/
 │   │   ├── indicators.py           # 技术指标库 (BB/ST/MACD/KDJ/ADX/VWAP/动量/波动率)
-│   │   └── feature_engineering.py  # 特征工程 (12维HMM特征 + 交易指标)
-│   │
-│   ├── models/
-│   │   └── hmm_engine.py           # GMM-HMM 状态推理引擎 (5状态)
+│   │   └── feature_engineering.py  # 特征工程 (统计特征 + 交易指标)
 │   │
 │   ├── strategy/
 │   │   ├── analyzers.py            # 📊 策略信号生成 (ADX+VWAP+Appel三层过滤)
@@ -146,15 +143,7 @@ REDIS_DB=0
 
 > 注意：默认 `Config.ENABLE_MAIL_REPORT = False`，未开启邮件报告时不会连接 Redis 或调用邮件服务。
 
-### 2. 训练 HMM 模型
-
-```bash
-python backtest/GMMHMM.py
-```
-
-训练完成后会在 `backtest/` 目录下生成模型文件 `.pkl` 和状态分布图 `.png`。
-
-### 3. 回测验证
+### 2. 回测验证
 
 ```bash
 # 基础回测 (默认拉取50万根1分钟K线)
@@ -169,7 +158,7 @@ python backtest/backtester.py --symbol SOL/USDT --lookback-days 30
 
 回测结果输出到 `backtest/outputs/` 目录，包含资金曲线图和交易明细 CSV。
 
-### 4. 预热模型
+### 3. 预热模型
 
 ```bash
 python scripts/pretrain.py
@@ -177,7 +166,7 @@ python scripts/pretrain.py
 
 异步拉取最近 1000 根 1m + 300 根 15m K 线，预填充技术指标缓存。
 
-### 5. 启动实盘
+### 4. 启动实盘
 
 ```bash
 python run.py          # 交互式选择模式
@@ -191,13 +180,16 @@ python run.py 2        # 直接进入实盘 (Live)
 - `1` 模拟盘（推荐先验证策略）
 - `2` 实盘（需正确配置 Binance API）
 
-### 6. 启动邮件报告 (可选)
+### 5. 启动邮件报告 (可选)
 
 ```bash
 python scripts/run_report.py
 ```
 
 每日 11:00 / 23:00 自动发送交易报告邮件，支持 CSV 附件。
+
+- **11:00 邮件**：额外包含基于 Binance 日线 (`1d`) 计算的技术指标快照（RSI/ATR/BB/MACD/KDJ/ADX/DI/VWAP 等）。
+- **23:00 邮件**：常规交易/心跳报告，不附加日线快照。
 
 ---
 
@@ -210,7 +202,6 @@ graph LR
     A -->|深度/费率| B
     B --> C[feature_engineering.py]
     C -->|指标计算| D[indicators.py]
-    C -->|HMM特征| E[hmm_engine.py]
     B --> F[analyzers.py]
     F -->|L1: ADX过滤| F
     F -->|L2: VWAP+DI| F

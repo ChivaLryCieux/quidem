@@ -32,7 +32,7 @@ def _format_change(change_pct):
     else:
         return f"📉 {change_pct:.2f}%"
 
-def job():
+def job(include_daily_indicators=False):
     logger.info("Starting Report Job...")
     r = service.redis_client
     if not r:
@@ -54,11 +54,17 @@ def job():
     change_24h = status.get('change_24h', 0.0) if status else 0.0
     change_str = _format_change(change_24h)
     
+    daily_indicators = service.fetch_daily_indicators() if include_daily_indicators else None
+
     # 2. Generate and Send
     try:
         if trades:
             logger.info(f"Generating report for {len(trades)} trades...")
-            html = service.generate_trade_report_html(trades, change_24h=change_24h)
+            html = service.generate_trade_report_html(
+                trades,
+                change_24h=change_24h,
+                daily_indicators=daily_indicators
+            )
             csv_path, csv_name = service.create_csv_export(trades)
             
             # Read CSV bytes
@@ -78,7 +84,7 @@ def job():
         else:
             logger.info("No trades. Checking heartbeat...")
             
-            html = service.generate_heartbeat_html(status)
+            html = service.generate_heartbeat_html(status, daily_indicators=daily_indicators)
             bal = status.get('balance', 0) if status else 0
             
             params = {
@@ -96,8 +102,8 @@ def job():
             r.lpush('trade_journal_pending', json.dumps(t))
 
 # Schedule
-schedule.every().day.at("11:00").do(job)
-schedule.every().day.at("23:00").do(job)
+schedule.every().day.at("11:00").do(lambda: job(include_daily_indicators=True))
+schedule.every().day.at("23:00").do(lambda: job(include_daily_indicators=False))
 
 if __name__ == "__main__":
     print(">>> Report Runner Started")

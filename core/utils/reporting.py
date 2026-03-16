@@ -2,6 +2,7 @@
 import redis
 import json
 import time
+import ccxt
 import pandas as pd
 import base64
 import io
@@ -17,6 +18,10 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import matplotlib.dates as mdates
 
 from core.config.settings import Config
+from core.analysis.indicators import (
+    BollingerBands, SuperTrend, MACDCalculator, KDJCalculator,
+    ADXCalculator, VWAPCalculator, MathUtils
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +40,28 @@ class ReportService:
 
         self.archive_dir = os.path.expanduser("~/quant_archive")
         self._ensure_dir(self.archive_dir)
+
+        self._daily_exchange = None
+        self._bb = BollingerBands(period=20, std_mult=2.0)
+        self._supertrend = SuperTrend(atr_period=10, multiplier=3.0)
+        self._macd = MACDCalculator(fast=12, slow=26, signal=9)
+        self._fast_macd = MACDCalculator(fast=8, slow=17, signal=9)
+        self._kdj = KDJCalculator(k_period=9, d_period=3, j_smooth=3)
+        self._adx = ADXCalculator(period=14)
+        self._vwap = VWAPCalculator(period=20)
+
+    def _init_daily_exchange(self):
+        if self._daily_exchange is not None:
+            return self._daily_exchange
+        conf = {
+            'enableRateLimit': True,
+            'timeout': 10000,
+            'options': {'defaultType': 'future'}
+        }
+        if Config.PROXY_URL:
+            conf['proxies'] = {'http': Config.PROXY_URL, 'https': Config.PROXY_URL}
+        self._daily_exchange = ccxt.binance(conf)
+        return self._daily_exchange
 
     def _ensure_dir(self, path):
         if not os.path.exists(path): os.makedirs(path)
@@ -137,7 +164,71 @@ class ReportService:
         </div>
         """
 
-    def generate_trade_report_html(self, trades, change_24h=0.0):
+    def _format_daily_indicator_section(self, daily_indicators):
+        if not daily_indicators:
+            return ""
+
+        rows = ""
+        for key, value in daily_indicators.items():
+            label = key.replace('_', ' ').upper()
+            if isinstance(value, (int, float)):
+                val = f"{value:.4f}"
+            else:
+                val = str(value)
+            rows += f"<tr><td style='padding:6px;border-bottom:1px solid #eee'>{label}</td><td style='padding:6px;border-bottom:1px solid #eee'><b>{val}</b></td></tr>"
+
+        return f"""
+        <div style="margin:18px 0;">
+            <h3 style="margin-bottom:8px;">📅 日线技术指标快照</h3>
+            <table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #eee;border-radius:6px;overflow:hidden;">
+                <thead><tr><th style="text-align:left;padding:8px;background:#f6f7f9;">指标</th><th style="text-align:left;padding:8px;background:#f6f7f9;">当前值</th></tr></thead>
+                <tbody>{rows}</tbody>
+            </table>
+        </div>
+        """
+
+    def fetch_daily_indicators(self):
+        try:
+            ex = self._init_daily_exchange()
+            ohlcv = ex.fetch_ohlcv(Config.SYMBOL, '1d', limit=150)
+            if not ohlcv or len(ohlcv) < 35:
+                return None
+
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['taker_buy'] = df['volume'] * 0.5
+            curr_price = float(df.iloc[-1]['close'])
+
+            bb = self._bb.calculate(df)
+            st = self._supertrend.calculate(df)
+            macd = self._macd.calculate(df)
+            fast_macd = self._fast_macd.calculate(df)
+            kdj = self._kdj.calculate(df)
+            adx = self._adx.calculate(df)
+            vwap = self._vwap.calculate(df)
+            atr = MathUtils.calc_atr(df).iloc[-1]
+            rsi = MathUtils.calc_rsi(df['close']).iloc[-1]
+
+            return {
+                'price': curr_price,
+                'rsi': float(rsi),
+                'atr': float(atr),
+                'bb_distance': float(bb['distance']),
+                'supertrend_direction': int(st['direction']),
+                'macd_histogram': float(macd['histogram']),
+                'fast_macd_histogram': float(fast_macd['histogram']),
+                'kdj_k': float(kdj['k']),
+                'kdj_d': float(kdj['d']),
+                'kdj_j': float(kdj['j']),
+                'adx': float(adx['adx']),
+                'plus_di': float(adx['plus_di']),
+                'minus_di': float(adx['minus_di']),
+                'vwap_distance': float(vwap['distance']),
+            }
+        except Exception as e:
+            logger.warning(f"Daily indicator snapshot unavailable: {e}")
+            return None
+
+    def generate_trade_report_html(self, trades, change_24h=0.0, daily_indicators=None):
         if not trades: return None
         
         # Stats
@@ -159,6 +250,7 @@ class ReportService:
         # Graphs
         equity_img = self.generate_equity_curve_b64(trades)
         change_badge = self._format_change_badge(change_24h)
+        daily_indicator_section = self._format_daily_indicator_section(daily_indicators)
         
         # HTML Components
         rows = ""
@@ -201,6 +293,7 @@ class ReportService:
                 <div class="card"><div class="val">{win_rate:.0f}%</div><div>Win Rate</div></div>
             </div>
             {change_badge}
+            {daily_indicator_section}
             {('<img src="'+equity_img+'" style="width:100%;border:1px solid #eee;border-radius:5px;margin-bottom:20px;">' if equity_img else '')}
             <table>
                 <thead><tr><th>EntryTime</th><th>Action</th><th>PnL</th><th>Trend</th><th>Exit</th></tr></thead>
@@ -211,12 +304,13 @@ class ReportService:
         """
         return html
 
-    def generate_heartbeat_html(self, status):
+    def generate_heartbeat_html(self, status, daily_indicators=None):
         if not status: return "<html><body>No Data</body></html>"
         
         ts = datetime.fromtimestamp(status['timestamp']/1000).strftime('%Y-%m-%d %H:%M:%S')
         change_24h = status.get('change_24h', 0.0)
         change_badge = self._format_change_badge(change_24h)
+        daily_indicator_section = self._format_daily_indicator_section(daily_indicators)
         
         return f"""
         <html>
@@ -228,6 +322,7 @@ class ReportService:
                 <div style="color:#666">Current Equity</div>
             </div>
             {change_badge}
+            {daily_indicator_section}
             <div style="margin-top:20px;">
                 <b>Status:</b> {status.get('regime','Unknown')}<br>
                 <b>Price:</b> ${status.get('price',0):.4f}<br>
