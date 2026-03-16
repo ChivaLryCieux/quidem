@@ -21,7 +21,8 @@ class Config:
     SYMBOL = 'SOL/USDT'
     SYMBOL_WS = 'solusdt'  # WebSocket用的全小写无斜杠名称
     TIMEFRAME_SIGNAL = '5m'   # 信号生成和交易执行周期
-    TIMEFRAME_TREND = '15m'   # 大趋势过滤周期
+    TIMEFRAME_TREND = '15m'   # 中趋势过滤周期
+    TIMEFRAME_MACRO = '1h'    # 宏观趋势过滤周期（刻时模型）
     TIMEFRAME = '5m'          # 主周期，兼容旧代码
 
     # 资金管理
