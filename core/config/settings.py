@@ -57,6 +57,15 @@ class Config:
     MAIL_TO = [addr.strip() for addr in os.getenv("MAIL_TO", "3433551710@qq.com,2874575651@qq.com").split(",") if addr.strip()]
     RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 
+
+    # 爆仓预警开关与参数
+    ENABLE_LIQUIDATION_ALERT = os.getenv("ENABLE_LIQUIDATION_ALERT", "false").lower() == "true"
+    LIQUIDATION_ALERT_SYMBOL = os.getenv("LIQUIDATION_ALERT_SYMBOL", "SOLUSDT")
+    LIQUIDATION_ALERT_WINDOW_SEC = int(os.getenv("LIQUIDATION_ALERT_WINDOW_SEC", "300"))
+    LIQUIDATION_ALERT_THRESHOLD_USD = float(os.getenv("LIQUIDATION_ALERT_THRESHOLD_USD", "1000000"))
+    LIQUIDATION_ALERT_POLL_INTERVAL_SEC = int(os.getenv("LIQUIDATION_ALERT_POLL_INTERVAL_SEC", "30"))
+    LIQUIDATION_ALERT_COOLDOWN_SEC = int(os.getenv("LIQUIDATION_ALERT_COOLDOWN_SEC", "900"))
+
     # 日志配置
     LOG_LEVEL = 'INFO'
     LOG_DIR = 'logs'
