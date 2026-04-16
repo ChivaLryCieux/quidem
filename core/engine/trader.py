@@ -13,7 +13,6 @@ class TradeExecutor:
     BREAKEVEN_ACTIVATE = 0.002
     TRAIL_ACTIVATE = 0.004
     TRAIL_LOCK_RATIO = 0.50
-    POSITION_ALLOC_RATIO = 0.20
 
     def __init__(self, exchange_service, risk_manager, ui_manager, brain):
         self.exchange = exchange_service
@@ -22,8 +21,8 @@ class TradeExecutor:
         self.brain = brain
 
         self.redis_client = None
-        self.balance = 100.0
-        self.position = {'size': 0.0, 'entry_price': 0.0, 'sl': 0.0, 'tp': 0.0, 'entry_time': 0}
+        self.balance = Config.PAPER_BALANCE
+        self.position = self._empty_position()
 
         self.profit_flip_count = 0
         self.was_in_profit = False
@@ -38,6 +37,17 @@ class TradeExecutor:
 
     def update_balance(self, new_balance):
         self.balance = new_balance
+
+    @staticmethod
+    def _empty_position():
+        return {
+            'size': 0.0,
+            'entry_price': 0.0,
+            'sl': 0.0,
+            'tp': 0.0,
+            'entry_time': 0,
+            'leverage': Config.DEFAULT_LEVERAGE,
+        }
 
     def tick(self, curr_price, funding_rate, analysis_data, timestamp):
         self._record_trade_snapshot(curr_price)
@@ -161,7 +171,7 @@ class TradeExecutor:
             return
 
         self.last_traded_candle_timestamp = timestamp
-        self.position = self._build_position(sig, amount, price, data)
+        self.position = self._build_position(sig, amount, price, data, lev)
 
         self.ui.log_entry(
             regime,
@@ -179,10 +189,10 @@ class TradeExecutor:
         self.max_pnl_pct = 0.0
 
     def _calculate_order_amount(self, price, leverage):
-        raw_amount = (self.balance * self.POSITION_ALLOC_RATIO) / ((1 / leverage) + Config.TAKER_FEE_RATE) / price
+        raw_amount = (self.balance * Config.POSITION_ALLOC_RATIO) / ((1 / leverage) + Config.TAKER_FEE_RATE) / price
         return self.exchange.get_precision_amount(raw_amount, price)
 
-    def _build_position(self, signal, amount, price, analysis_data):
+    def _build_position(self, signal, amount, price, analysis_data, leverage):
         atr = float(analysis_data.get('atr', 0.0)) if analysis_data else 0.0
         reversal = float(analysis_data.get('reversal_factor', 0.0)) if analysis_data else 0.0
 
@@ -198,6 +208,7 @@ class TradeExecutor:
             'entry_time': time.time() * 1000,
             'sl': price - sl_dist if is_long else price + sl_dist,
             'tp': price + tp_dist if is_long else price - tp_dist,
+            'leverage': leverage,
         }
 
     def _calculate_raw_pnl_pct(self, curr_price):
@@ -221,7 +232,7 @@ class TradeExecutor:
 
         self.balance += net_pnl
         self.max_pnl_pct = 0.0
-        margin_used = abs(pos_size) * entry / Config.MAX_LEVERAGE
+        margin_used = abs(pos_size) * entry / self.position.get('leverage', Config.DEFAULT_LEVERAGE)
         _, cd_msg = self.risk.activate_circuit_breaker(net_pnl, margin_used)
 
         self.ui.log_exit(reason, price, net_pnl, fee, self.balance, cd_msg)
@@ -229,7 +240,7 @@ class TradeExecutor:
 
         self.trade_snapshots = []
         self.last_snapshot_time = 0
-        self.position = {'size': 0.0, 'entry_price': 0.0, 'sl': 0.0, 'tp': 0.0, 'entry_time': 0}
+        self.position = self._empty_position()
 
     def _report_trade_exit(self, pos_size, entry, price, net_pnl, fee, reason):
         if not (Config.ENABLE_MAIL_REPORT and self.redis_client):
@@ -244,7 +255,7 @@ class TradeExecutor:
                 "entry_price": entry,
                 "exit_price": price,
                 "amount": abs(pos_size),
-                "leverage": Config.MAX_LEVERAGE,
+                "leverage": self.position.get('leverage', Config.DEFAULT_LEVERAGE),
                 "pnl": net_pnl,
                 "fee": fee,
                 "balance": self.balance,

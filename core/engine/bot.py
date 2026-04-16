@@ -47,6 +47,7 @@ class QuantBot:
         self.is_live = self.mode == '2'
         self.mode_name = "实盘" if self.is_live else "模拟盘"
         logger.info(f"Mode Set: {self.mode_name}")
+        self._validate_runtime_config()
 
         self.exchange = ExchangeService(self.is_live)
         self.brain = StrategyBrain()
@@ -60,6 +61,15 @@ class QuantBot:
         self.last_tick_analysis = None
         self.last_tick_price = 0.0
         self.last_btc_price = 0.0
+
+    def _validate_runtime_config(self):
+        issues = Config.validate_for_mode(is_live=self.is_live)
+        if not issues:
+            return
+
+        for issue in issues:
+            logger.error("Config validation failed: %s", issue)
+        raise SystemExit("配置校验失败，请修正 .env 或 core/config/settings.py 后重试")
 
     def _get_mode(self, override):
         if override:
@@ -81,7 +91,7 @@ class QuantBot:
             return None
 
         try:
-            client = redis.Redis(host='localhost', port=6379, db=0, socket_timeout=1)
+            client = redis.Redis(**Config.redis_kwargs())
             client.ping()
             logger.info("Report Service Connected")
             self.trader.set_redis_client(client)

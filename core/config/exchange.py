@@ -1,11 +1,11 @@
-import os
-import sys
-import time
 import json
-import threading
-import websocket
-import ccxt
 import logging
+import sys
+import threading
+import time
+
+import ccxt
+import websocket
 from .settings import Config
 from colorama import Fore, Style
 
@@ -43,8 +43,6 @@ class MarketDataStreamer(threading.Thread):
         }
         self.running = True
         self._last_update_time = time.time()
-        self.running = True
-        self._last_update_time = time.time()
 
     def run(self):
         while self.running:
@@ -61,7 +59,7 @@ class MarketDataStreamer(threading.Thread):
 
                 # 设置代理
                 proxy_opts = {}
-                if Config.PROXY_HOST and Config.PROXY_PORT:
+                if Config.PROXY_ENABLED and Config.PROXY_HOST and Config.PROXY_PORT:
                     proxy_opts = {
                         "http_proxy_host": Config.PROXY_HOST,
                         "http_proxy_port": Config.PROXY_PORT,
@@ -74,8 +72,8 @@ class MarketDataStreamer(threading.Thread):
                 logger.error(f"WS Critical Error: {e}")
 
             if self.running:
-                logger.warning("WS Disconnected. Reconnecting in 3s...")
-                time.sleep(3)
+                logger.warning("WS Disconnected. Reconnecting in %.1fs...", Config.WS_RECONNECT_DELAY_SEC)
+                time.sleep(Config.WS_RECONNECT_DELAY_SEC)
 
     def _on_open(self, ws):
         print(f"{Fore.GREEN}[WS] Connected to Binance Futures Stream{Style.RESET_ALL}")
@@ -160,22 +158,17 @@ class MarketDataStreamer(threading.Thread):
 class ExchangeService:
     def __init__(self, is_live=False):
         self.is_live = is_live
+        self.paper_orders = []
 
         # 增加 timeout 防止网络卡死
         conf = {
             'enableRateLimit': True,
-            'timeout': 10000,  # 10秒超时
-            'proxies': {'http': Config.PROXY_URL, 'https': Config.PROXY_URL},
+            'timeout': Config.HTTP_TIMEOUT_MS,
+            'proxies': Config.exchange_proxies(),
             'options': {'defaultType': 'future'}
         }
 
         if is_live:
-            # 添加调试信息验证API密钥加载
-            logger.info(f"API_KEY loaded: {Config.API_KEY is not None}")
-            logger.info(f"API_SECRET loaded: {Config.API_SECRET is not None}")
-            logger.info(f"API_KEY length: {len(Config.API_KEY) if Config.API_KEY else 0}")
-            logger.info(f"API_SECRET length: {len(Config.API_SECRET) if Config.API_SECRET else 0}")
-            
             if not Config.API_KEY or not Config.API_SECRET:
                 logger.error("Live mode selected but API credentials missing!")
                 # 不抛出异常，允许程序继续运行(只读)，但在下单时会失败
@@ -208,7 +201,7 @@ class ExchangeService:
 
             # 等待 WebSocket 预热
             timeout = 0
-            max_timeout = 30  # 最大等待30秒
+            max_timeout = Config.WS_READY_TIMEOUT_SEC
             
             while not self.ws_streamer.data['is_ready']:
                 time.sleep(1)
@@ -218,7 +211,7 @@ class ExchangeService:
                 logger.info(f"  Waiting for WS data... {timeout}s / {max_timeout}s")
                 sys.stdout.flush()
                 
-                if timeout > max_timeout:
+                if timeout >= max_timeout:
                     logger.error(f"❌ WS Connection Timeout ({max_timeout}s)")
                     logger.error("Please check:")
                     logger.error("  1. Proxy is running (port 7890)")
@@ -278,8 +271,17 @@ class ExchangeService:
             logger.error(f"Precision Error: {e}")
             return amount
 
-    def execute_order(self, side, amount, params={}):
+    def execute_order(self, side, amount, params=None):
+        params = params or {}
         if not self.is_live:
+            order = {
+                "timestamp": int(time.time() * 1000),
+                "symbol": self.symbol,
+                "side": side,
+                "amount": amount,
+                "params": params.copy(),
+            }
+            self.paper_orders.append(order)
             logger.info(f"[PAPER] Order {side} {amount} {params}")
             return True
 
@@ -312,9 +314,9 @@ class ExchangeService:
         if not self.is_live:
             # 模拟盘返回默认余额100 USDT
             return {
-                'free': 100.0,
+                'free': Config.PAPER_BALANCE,
                 'used': 0.0,
-                'total': 100.0
+                'total': Config.PAPER_BALANCE
             }
             
         try:

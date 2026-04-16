@@ -23,7 +23,20 @@ resend.api_key = RESEND_API_KEY
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("ReportRunner")
 
-service = ReportService()
+service = None
+
+def _validate_report_config():
+    issues = Config.validate_for_mode(is_live=False)
+    if Config.ENABLE_MAIL_REPORT and not issues:
+        return True
+
+    if not Config.ENABLE_MAIL_REPORT:
+        logger.error("ENABLE_MAIL_REPORT=False, report runner will not send emails.")
+        return False
+
+    for issue in issues:
+        logger.error("Config validation failed: %s", issue)
+    return False
 
 def _format_change(change_pct):
     """格式化24h涨跌幅"""
@@ -33,6 +46,10 @@ def _format_change(change_pct):
         return f"📉 {change_pct:.2f}%"
 
 def job(include_daily_indicators=False):
+    global service
+    if service is None:
+        service = ReportService()
+
     logger.info("Starting Report Job...")
     r = service.redis_client
     if not r:
@@ -106,6 +123,11 @@ schedule.every().day.at("11:00").do(lambda: job(include_daily_indicators=True))
 schedule.every().day.at("23:00").do(lambda: job(include_daily_indicators=False))
 
 if __name__ == "__main__":
+    if not _validate_report_config():
+        raise SystemExit(1)
+
+    service = ReportService()
+
     print(">>> Report Runner Started")
     print(f"Target Emails: {MAIL_TO}")
     

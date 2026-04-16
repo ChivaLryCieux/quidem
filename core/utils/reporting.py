@@ -27,18 +27,14 @@ logger = logging.getLogger(__name__)
 
 class ReportService:
     def __init__(self):
-        host = getattr(Config, 'REDIS_HOST', 'localhost')
-        port = getattr(Config, 'REDIS_PORT', 6379)
-        db = getattr(Config, 'REDIS_DB', 0)
-
         try:
-            self.redis_client = redis.Redis(host=host, port=port, db=db, socket_timeout=3)
+            self.redis_client = redis.Redis(**Config.redis_kwargs(timeout=3))
             self.redis_client.ping()
         except Exception as e:
             logger.error(f"ReportService Redis Connection Failed: {e}")
             self.redis_client = None
 
-        self.archive_dir = os.path.expanduser("~/quant_archive")
+        self.archive_dir = os.path.expanduser(Config.REPORT_ARCHIVE_DIR)
         self._ensure_dir(self.archive_dir)
 
         self._daily_exchange = None
@@ -55,11 +51,12 @@ class ReportService:
             return self._daily_exchange
         conf = {
             'enableRateLimit': True,
-            'timeout': 10000,
+            'timeout': Config.HTTP_TIMEOUT_MS,
             'options': {'defaultType': 'future'}
         }
-        if Config.PROXY_URL:
-            conf['proxies'] = {'http': Config.PROXY_URL, 'https': Config.PROXY_URL}
+        proxies = Config.exchange_proxies()
+        if proxies:
+            conf['proxies'] = proxies
         self._daily_exchange = ccxt.binance(conf)
         return self._daily_exchange
 

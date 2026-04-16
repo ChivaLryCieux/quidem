@@ -15,7 +15,7 @@
 
 import time
 
-from core.config import Config
+from core.config.settings import Config
 
 
 class RiskManager:
