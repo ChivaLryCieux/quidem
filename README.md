@@ -200,8 +200,8 @@ BINANCE_SECRET=your_secret_key
 | 微结构 | `OBI_THRESHOLD_BREAKOUT` | `0.1` | 盘口失衡阈值（突破侧） |
 | 微结构 | `MAX_SPREAD_PCT` | `0.001` | 最大允许买卖价差（相对） |
 | 邮件报告 | `ENABLE_MAIL_REPORT` | `False` | 启用邮件报告（需 Redis 运行） |
-| 邮件报告 | `MAIL_FROM` | `CTA q-bot <report@abyssalfish.top>` | 发件人 |
-| 邮件报告 | `MAIL_TO` | （示例邮箱） | 收件人，多个用英文逗号分隔 |
+| 邮件报告 | `MAIL_FROM` | — | 发件人，例如 `CTA q-bot <report@your-domain.com>` |
+| 邮件报告 | `MAIL_TO` | — | 收件人，多个以英文逗号分隔 |
 | 邮件报告 | `RESEND_API_KEY` | — | Resend API Key |
 | 邮件报告 | `REDIS_HOST` | `localhost` | Redis 主机 |
 | 邮件报告 | `REDIS_PORT` | `6379` | Redis 端口 |

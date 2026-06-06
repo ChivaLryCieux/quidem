@@ -102,8 +102,8 @@ class Config:
 
     #邮件报告开关
     ENABLE_MAIL_REPORT = _env_bool("ENABLE_MAIL_REPORT", False)
-    MAIL_FROM = os.getenv("MAIL_FROM", "CTA q-bot <report@abyssalfish.top>")
-    MAIL_TO = _env_list("MAIL_TO", "3433551710@qq.com,2874575651@qq.com")
+    MAIL_FROM = os.getenv("MAIL_FROM", "")              # 发件人，必须在 .env 中显式配置（例如 "CTA q-bot <foo@your-domain.com>"）
+    MAIL_TO = _env_list("MAIL_TO", "")                  # 收件人，多个以英文逗号分隔
     RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
     REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
     REDIS_PORT = _env_int("REDIS_PORT", 6379)
