@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quidem-cta"
+version = "0.1.0"
+description = "个人量化交易 CTA 系统 - Binance 永续合约，实时行情 + 策略决策 + 风控执行 + 邮件日报"
+requires-python = ">=3.10"
+readme = "README.md"
+authors = [{ name = "Quidem" }]
+dependencies = [
+    "aiohttp",
+    "ccxt==4.5.22",
+    "colorama==0.4.6",
+    "hmmlearn==0.3.3",
+    "joblib==1.4.2",
+    "matplotlib",
+    "numpy",
+    "pandas==2.0.3",
+    "python-dotenv==1.2.1",
+    "redis==7.2.1",
+    "requests==2.32.5",
+    "resend==2.23.0",
+    "schedule==1.2.2",
+    "scikit-learn",
+    "seaborn==0.13.2",
+    "statsmodels==0.14.2",
+    "websocket-client==1.8.0",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[project.scripts]
+quidem-bot = "run:main"
+
+[tool.setuptools]
+packages = ["core", "core.config", "core.engine", "core.analysis", "core.strategy", "core.risk", "core.ui", "core.utils"]
+
+[tool.setuptools.package-data]
+core = ["*.yaml", "*.yml", "*.json"]

@@ -1,0 +1,42 @@
+# ---- Bytecode / Cache ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+
+# ---- Virtual environments ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- IDE / Editor ----
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---- Environment & secrets ----
+.env
+.env.local
+.env.*.local
+
+# ---- Logs ----
+logs/
+*.log
+
+# ---- Report / research artifacts ----
+quant_archive/
+*.png
+*.csv
+*.pkl
+*.html
+
+# ---- Build / dist ----
+build/
+dist/
+*.egg-info/
+*.egg
