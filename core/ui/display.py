@@ -1,106 +1,318 @@
-import os
-import sys
+"""
+Rich TUI 显示管理器
+
+使用 Rich 库实现现代化的终端界面，包括：
+- 彩色输出和样式
+- 面板和表格布局
+- 实时状态栏
+- 日志消息格式化
+"""
+
 import logging
 import time
-from colorama import Fore, Style
+from datetime import datetime
+from typing import Optional
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from rich.layout import Layout
+from rich.live import Live
+from rich.rule import Rule
+from rich.style import Style
+from rich.box import ROUNDED, SIMPLE_HEAVY
+
 from core.config.settings import Config
 
 logger = logging.getLogger(__name__)
 
+# 自定义样式
+STYLES = {
+    'title': Style(color='cyan', bold=True),
+    'mode': Style(color='green', bold=True),
+    'symbol': Style(color='yellow', bold=True),
+    'info': Style(color='blue'),
+    'success': Style(color='green'),
+    'warning': Style(color='yellow'),
+    'error': Style(color='red', bold=True),
+    'dim': Style(dim=True),
+    'price': Style(color='white', bold=True),
+    'pnl_positive': Style(color='green', bold=True),
+    'pnl_negative': Style(color='red', bold=True),
+    'long': Style(color='green', bold=True),
+    'short': Style(color='red', bold=True),
+    'neutral': Style(color='white'),
+    'header': Style(color='cyan', bold=True),
+    'accent': Style(color='magenta'),
+}
+
 
 class DisplayManager:
+    """Rich TUI 显示管理器"""
+
     def __init__(self):
+        self.console = Console()
         self.last_status_len = 0
+        self._live: Optional[Live] = None
+        self._status_table: Optional[Table] = None
 
-    def log_startup(self, mode_name, strategy_desc=""):
-        os.system('cls' if os.name == 'nt' else 'clear')  # 启动时清屏
-        print()
-        print(f"{Fore.CYAN}=========================================")
-        print(f"   {Config.SYMBOL} 短线量化CTA系统终端")
-        print(f"========================================={Style.RESET_ALL}")
-        print(f"{Fore.GREEN}>>> 模式: {mode_name}{Style.RESET_ALL}")
+    def log_startup(self, mode_name: str, strategy_desc: str = ""):
+        """显示启动信息"""
+        self.console.clear()
+
+        # 创建启动面板
+        title_text = Text()
+        title_text.append("◈ ", style='red bold')
+        title_text.append("QUIDEM", style='white bold')
+        title_text.append("_", style='red bold')
+        title_text.append("CTA", style='white bold')
+
+        content = Text()
+        content.append(f"\n  Symbol: ", style='dim')
+        content.append(f"{Config.SYMBOL}", style='cyan bold')
+        content.append(f"\n  Mode:   ", style='dim')
+        content.append(f"{mode_name}", style='green bold' if mode_name == "模拟盘" else 'red bold')
+
         if strategy_desc:
-            print(f"{Fore.YELLOW}>>> 策略: {strategy_desc}{Style.RESET_ALL}")
-        print("-" * 41)
+            content.append(f"\n  Strategy: ", style='dim')
+            content.append(f"{strategy_desc}", style='yellow')
 
-    def _clear_line(self):
-        """清除当前行，准备打印日志"""
-        # \r 回到行首, \033[K 清除光标后所有字符
-        sys.stdout.write("\r\033[K")
-        sys.stdout.flush()
+        content.append(f"\n\n  ", style='dim')
+        content.append("━" * 36, style='dim')
 
-    def log_msg(self, msg, level="info"):
-        self._clear_line()
+        panel = Panel(
+            content,
+            title=title_text,
+            border_style='red',
+            box=ROUNDED,
+            padding=(1, 2),
+        )
 
-        timestamp = time.strftime("%H:%M:%S", time.localtime())
-        prefix = f"{Style.DIM}[{timestamp}]{Style.RESET_ALL}"
+        self.console.print(panel)
+        self.console.print()
 
-        if level == "error":
-            print(f"{prefix} {Fore.RED}❌ [ERR] {msg}{Style.RESET_ALL}")
-        elif level == "success":
-            print(f"{prefix} {Fore.GREEN}✅ [OK]  {msg}{Style.RESET_ALL}")
-        elif level == "warning":
-            print(f"{prefix} {Fore.YELLOW}⚠️ [WARN] {msg}{Style.RESET_ALL}")
-        else:
-            print(f"{prefix} {Fore.CYAN}ℹ️ [INFO] {msg}{Style.RESET_ALL}")
+    def _get_timestamp(self) -> str:
+        """获取格式化的时间戳"""
+        return datetime.now().strftime("%H:%M:%S")
 
-    def log_entry(self, regime, color, side, leverage, price, sl, tp, macd=0.0, bb_mid=0.0, st_val=0.0):
-        self._clear_line()
+    def log_msg(self, msg: str, level: str = "info"):
+        """输出日志消息"""
+        timestamp = self._get_timestamp()
 
-        dir_str = "开多 (LONG)" if side == 1 else "开空 (SHORT)"
-        dir_color = Fore.GREEN if side == 1 else Fore.RED
+        # 根据级别选择样式
+        level_config = {
+            'error': ('✖', 'red bold', 'ERROR'),
+            'success': ('✔', 'green bold', 'OK'),
+            'warning': ('⚠', 'yellow bold', 'WARN'),
+            'info': ('●', 'blue', 'INFO'),
+        }
 
-        # 构建日志字符串 (用于文件)
-        log_str = f"{regime} | {dir_str} | {leverage}x | MACD:{macd:.5f} | TP:{tp:.4f} | SL:{sl:.4f}"
+        icon, style, label = level_config.get(level, ('●', 'blue', 'INFO'))
+
+        # 构建消息
+        text = Text()
+        text.append(f" {timestamp} ", style='dim')
+        text.append(f"{icon} ", style=style)
+        text.append(f"[{label}] ", style=style)
+        text.append(msg, style='white')
+
+        self.console.print(text)
+
+    def log_entry(self, regime: str, color: str, side: int, leverage: float,
+                  price: float, sl: float, tp: float, macd: float = 0.0,
+                  bb_mid: float = 0.0, st_val: float = 0.0):
+        """输出开仓日志"""
+        timestamp = self._get_timestamp()
+        dir_str = "LONG" if side == 1 else "SHORT"
+        dir_style = 'long' if side == 1 else 'short'
+
+        # 记录到日志文件
+        log_str = f"{regime} | {'开多' if side == 1 else '开空'} | {leverage}x | MACD:{macd:.5f} | TP:{tp:.4f} | SL:{sl:.4f}"
         logger.info(log_str)
 
-        # 构建显示字符串 (用于屏幕)
-        display_str = (
-            f"{Fore.MAGENTA}[ENTRY] {Style.RESET_ALL}"
-            f"{color}{regime:<8}{Style.RESET_ALL} | "
-            f"{dir_color}{dir_str}{Style.RESET_ALL} | "
-            f"Lev:{leverage}x | "
-            f"Price:{price:.4f} | "
-            f"TP:{tp:.4f}"
-        )
-        print(display_str)
+        # 构建显示
+        text = Text()
+        text.append(f" {timestamp} ", style='dim')
+        text.append("▲ ENTRY ", style='magenta bold')
+        text.append(f"{regime:<8}", style='cyan')
+        text.append(" │ ", style='dim')
+        text.append(f"{dir_str:<5}", style=dir_style)
+        text.append(f" {leverage}x", style='white bold')
+        text.append(" │ ", style='dim')
+        text.append(f"Price: ", style='dim')
+        text.append(f"{price:.4f}", style='white bold')
+        text.append(" │ ", style='dim')
+        text.append(f"TP: ", style='dim')
+        text.append(f"{tp:.4f}", style='green')
+        text.append(" │ ", style='dim')
+        text.append(f"SL: ", style='dim')
+        text.append(f"{sl:.4f}", style='red')
 
-    def log_exit(self, reason, price, pnl, fee, balance, extra=""):
-        self._clear_line()
+        # 创建面板
+        panel = Panel(
+            text,
+            border_style='green' if side == 1 else 'red',
+            box=SIMPLE_HEAVY,
+            padding=(0, 1),
+        )
+
+        self.console.print(panel)
+
+    def log_exit(self, reason: str, price: float, pnl: float, fee: float,
+                 balance: float, extra: str = ""):
+        """输出平仓日志"""
+        timestamp = self._get_timestamp()
+        pnl_style = 'pnl_positive' if pnl >= 0 else 'pnl_negative'
+        pnl_sign = '+' if pnl >= 0 else ''
 
         # 记录到日志文件
         logger.info(f"{reason} | P:{price} | PnL:{pnl:+.2f} (Fee:-{fee:.2f}) | Bal:${balance:.2f} {extra}")
 
-        # 屏幕显示
-        pnl_color = Fore.GREEN if pnl >= 0 else Fore.RED
-        display_str = (
-            f"{Fore.MAGENTA}[EXIT ] {Style.RESET_ALL}"
-            f"{Fore.YELLOW}{reason:<10}{Style.RESET_ALL} | "
-            f"Price:{price:.4f} | "
-            f"PnL:{pnl_color}{pnl:+.2f}{Style.RESET_ALL} | "
-            f"Bal:{Fore.CYAN}${balance:.2f}{Style.RESET_ALL}"
-        )
-        print(display_str)
+        # 构建显示
+        text = Text()
+        text.append(f" {timestamp} ", style='dim')
+        text.append("▼ EXIT  ", style='magenta bold')
+        text.append(f"{reason:<10}", style='yellow')
+        text.append(" │ ", style='dim')
+        text.append(f"Price: ", style='dim')
+        text.append(f"{price:.4f}", style='white bold')
+        text.append(" │ ", style='dim')
+        text.append(f"PnL: ", style='dim')
+        text.append(f"{pnl_sign}${pnl:.2f}", style=pnl_style)
+        text.append(" │ ", style='dim')
+        text.append(f"Fee: ", style='dim')
+        text.append(f"-${fee:.2f}", style='dim')
+        text.append(" │ ", style='dim')
+        text.append(f"Bal: ", style='dim')
+        text.append(f"${balance:.2f}", style='cyan bold')
 
-    def update_status(self, pos, regime, color, pnl, price, macd=0.0, adx=0.0, reversal=0.0):
-        """实时刷新状态栏，展示最重要的三个指标：MACD/ADX/反转因子。"""
+        if extra:
+            text.append(f" │ {extra}", style='yellow')
+
+        # 创建面板
+        panel = Panel(
+            text,
+            border_style='green' if pnl >= 0 else 'red',
+            box=SIMPLE_HEAVY,
+            padding=(0, 1),
+        )
+
+        self.console.print(panel)
+
+    def update_status(self, pos: float, regime: str, color: str, pnl: float,
+                      price: float, macd: float = 0.0, adx: float = 0.0,
+                      reversal: float = 0.0):
+        """实时刷新状态栏"""
         regime = regime if regime else "N/A"
-        color = color if color else ""
 
-        status_icon = "🟢" if pos > 0 else "🔴" if pos < 0 else "⚪"
-        pnl_c = Fore.GREEN if pnl >= 0 else Fore.RED
-        macd_c = Fore.GREEN if macd >= 0 else Fore.RED
-        
-        info_str = (
-            f"\r\033[K"
-            f"{status_icon} "
-            f"{color}{regime:<8}{Style.RESET_ALL} | "
-            f"MACD:{macd_c}{macd:>+8.4f}{Style.RESET_ALL} | "
-            f"ADX:{adx:>5.1f} | "
-            f"REV:{reversal:>+5.2f} | "
-            f"P:{price:<8.4f} | "
-            f"{pnl_c}${pnl:>+7.2f}{Style.RESET_ALL}"
+        # 状态指示器
+        if pos > 0:
+            pos_icon = "▲"
+            pos_style = 'long'
+            pos_text = "LONG"
+        elif pos < 0:
+            pos_icon = "▼"
+            pos_style = 'short'
+            pos_text = "SHORT"
+        else:
+            pos_icon = "◇"
+            pos_style = 'neutral'
+            pos_text = "FLAT"
+
+        pnl_style = 'pnl_positive' if pnl >= 0 else 'pnl_negative'
+        pnl_sign = '+' if pnl >= 0 else ''
+        macd_style = 'pnl_positive' if macd >= 0 else 'pnl_negative'
+
+        # 构建状态行
+        text = Text()
+        text.append(f"\r", style='dim')
+
+        # 持仓状态
+        text.append(f" {pos_icon} {pos_text:<5}", style=pos_style)
+        text.append(" │ ", style='dim')
+
+        # 市场状态
+        text.append(f"{regime:<8}", style='cyan')
+        text.append(" │ ", style='dim')
+
+        # MACD
+        text.append(f"MACD:", style='dim')
+        text.append(f"{macd:>+8.4f}", style=macd_style)
+        text.append(" │ ", style='dim')
+
+        # ADX
+        text.append(f"ADX:", style='dim')
+        text.append(f"{adx:>5.1f}", style='white' if adx < 25 else 'yellow' if adx < 35 else 'red bold')
+        text.append(" │ ", style='dim')
+
+        # Reversal
+        text.append(f"REV:", style='dim')
+        text.append(f"{reversal:>+5.2f}", style='white')
+        text.append(" │ ", style='dim')
+
+        # 价格
+        text.append(f"Price:", style='dim')
+        text.append(f"{price:<9.4f}", style='white bold')
+        text.append(" │ ", style='dim')
+
+        # 盈亏
+        text.append(f"{pnl_sign}${pnl:>+8.2f}", style=pnl_style)
+
+        # 输出（使用 \r 覆盖同一行）
+        self.console.file.write(f"\r\033[K{text.plain}")
+        self.console.file.flush()
+
+    def print_separator(self):
+        """打印分隔线"""
+        self.console.print(Rule(style='dim'))
+
+    def print_header(self, text: str):
+        """打印标题"""
+        self.console.print(f"\n[bold cyan]{text}[/bold cyan]")
+        self.console.print(Rule(style='cyan'))
+
+    def create_status_table(self, data: dict) -> Table:
+        """创建状态表格"""
+        table = Table(
+            box=ROUNDED,
+            show_header=True,
+            header_style='header',
+            border_style='dim',
+            padding=(0, 1),
         )
 
-        sys.stdout.write(info_str)
-        sys.stdout.flush()
+        table.add_column("Key", style='dim')
+        table.add_column("Value", style='white')
+
+        for key, value in data.items():
+            table.add_row(key, str(value))
+
+        return table
+
+    def print_panel(self, content: str, title: str = "", border_style: str = 'dim'):
+        """打印面板"""
+        panel = Panel(
+            content,
+            title=title,
+            border_style=border_style,
+            box=ROUNDED,
+            padding=(0, 1),
+        )
+        self.console.print(panel)
+
+    def print_error(self, msg: str):
+        """打印错误消息"""
+        self.console.print(f"\n[bold red]✖ ERROR:[/bold red] {msg}\n")
+
+    def print_success(self, msg: str):
+        """打印成功消息"""
+        self.console.print(f"[bold green]✔ SUCCESS:[/bold green] {msg}")
+
+    def print_warning(self, msg: str):
+        """打印警告消息"""
+        self.console.print(f"[bold yellow]⚠ WARNING:[/bold yellow] {msg}")
+
+    def print_info(self, msg: str):
+        """打印信息消息"""
+        self.console.print(f"[blue]● INFO:[/blue] {msg}")
