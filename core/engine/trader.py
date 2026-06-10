@@ -3,6 +3,7 @@ import logging
 import time
 
 from core.config.settings import Config
+from core.risk.position_sizer import PositionSizer
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class TradeExecutor:
         self.web_state = None
         self.balance = Config.PAPER_BALANCE
         self.position = self._empty_position()
+        self.position_sizer = PositionSizer()
 
         self.profit_flip_count = 0
         self.was_in_profit = False
@@ -166,7 +168,7 @@ class TradeExecutor:
             self.ui.log_msg(f"跳过交易: {fr_msg}", "warning")
             return
 
-        amount = self._calculate_order_amount(price, lev)
+        amount = self._calculate_order_amount(price, lev, analysis_data=data, signal_strength=1.0)
         if amount <= 0:
             return
 
@@ -205,9 +207,28 @@ class TradeExecutor:
         self.profit_flip_count, self.was_in_profit = 0, False
         self.max_pnl_pct = 0.0
 
-    def _calculate_order_amount(self, price, leverage):
-        raw_amount = (self.balance * Config.POSITION_ALLOC_RATIO) / ((1 / leverage) + Config.TAKER_FEE_RATE) / price
-        return self.exchange.get_precision_amount(raw_amount, price)
+    def _calculate_order_amount(self, price, leverage, analysis_data=None, signal_strength=1.0):
+        """计算下单数量 - 使用Kelly Criterion + 动态仓位"""
+        atr = float(analysis_data.get('atr', 0.0)) if analysis_data else 0.0
+
+        # 使用PositionSizer计算最优仓位
+        amount, lev, info = self.position_sizer.get_position_size(
+            price=price,
+            atr=atr,
+            signal_strength=signal_strength,
+            balance=self.balance,
+            fee_rate=Config.TAKER_FEE_RATE,
+        )
+
+        if info.get('trade_count', 0) >= 20:
+            logger.info(
+                f"📊 仓位决策 | Kelly={info['kelly_alloc']:.1%} "
+                f"DD缩放={info['dd_scale']:.2f} 信号加权={info['signal_scale']:.2f} "
+                f"→ 仓位={info['final_alloc']:.1%} 杠杆={info['leverage']:.1f}x "
+                f"胜率={info['win_rate']:.1%} 盈亏比={info['avg_rr_ratio']:.2f}"
+            )
+
+        return self.exchange.get_precision_amount(amount, price)
 
     def _build_position(self, signal, amount, price, analysis_data, leverage):
         atr = float(analysis_data.get('atr', 0.0)) if analysis_data else 0.0
@@ -251,6 +272,11 @@ class TradeExecutor:
         self.max_pnl_pct = 0.0
         margin_used = abs(pos_size) * entry / self.position.get('leverage', Config.DEFAULT_LEVERAGE)
         _, cd_msg = self.risk.activate_circuit_breaker(net_pnl, margin_used)
+
+        # 更新PositionSizer
+        duration_min = (time.time() * 1000 - self.position['entry_time']) / 60000.0
+        self.position_sizer.record_trade(net_pnl, duration_min)
+        self.position_sizer.update_equity(self.balance)
 
         self.ui.log_exit(reason, price, net_pnl, fee, self.balance, cd_msg)
         self._report_trade_exit(pos_size, entry, price, net_pnl, fee, reason)
