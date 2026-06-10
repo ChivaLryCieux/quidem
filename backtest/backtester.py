@@ -447,6 +447,7 @@ class StrategyBacktesterUnified:
 
     def _report(self):
         from core.analysis.performance import PerformanceAnalyzer
+        from core.analysis.monte_carlo import MonteCarloSimulator
 
         real_trades = [t for t in self.trades if t['mode'] != 'INJECTION']
         if not real_trades:
@@ -465,6 +466,13 @@ class StrategyBacktesterUnified:
 
         if self.bankruptcy_count > 0:
             print(f"  ⚠️ 爆仓注入: {self.bankruptcy_count}次 (${self.total_injected:.0f})")
+
+        # 蒙特卡洛模拟
+        trade_pnls = [t['pnl'] for t in real_trades]
+        if len(trade_pnls) >= 20:
+            mc = MonteCarloSimulator(n_simulations=1000)
+            mc_result = mc.simulate(trade_pnls, self.initial_balance)
+            print(mc.format_report(mc_result))
 
         self._plot()
 
