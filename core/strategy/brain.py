@@ -15,6 +15,7 @@ from colorama import Fore
 from core.strategy.analyzers import SignalEngine
 from core.analysis.feature_engineering import FeatureEngineer
 from core.analysis.indicators import SuperTrend
+from core.analysis.regime import RegimeDetector
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,11 @@ class StrategyBrain:
         # 15m / 1h SuperTrend计算器
         self.supertrend_15m = SuperTrend(atr_period=10, multiplier=3.0)
         self.supertrend_1h = SuperTrend(atr_period=10, multiplier=3.0)
+
+        # HMM 市场状态检测器
+        self.regime_detector = RegimeDetector(n_states=4, lookback=100, retrain_interval=50)
+        self.current_regime = -1
+        self.regime_params = {}
 
     def ingest_candle(self, item, timeframe='5m', btc_change_pct=0.0, obi_value=0.0):
         """
@@ -139,6 +145,18 @@ class StrategyBrain:
             else:
                 self.state = "📉 小跌"
                 self.color = Fore.LIGHTRED_EX
+
+        # HMM 市场状态检测 (异步更新，不影响主逻辑)
+        try:
+            self.current_regime = self.regime_detector.update(self.history_5m)
+            self.regime_params = self.regime_detector.get_strategy_params()
+            regime_info = self.regime_detector.get_state_info()
+            feature_data['regime'] = self.current_regime
+            feature_data['regime_label'] = regime_info.get('label', '')
+            feature_data['regime_confidence'] = regime_info.get('confidence', 0.0)
+            feature_data['regime_params'] = self.regime_params
+        except Exception as e:
+            logger.debug(f"Regime detection error: {e}")
 
         return feature_data
 
