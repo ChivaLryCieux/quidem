@@ -82,6 +82,8 @@ const defaultSystem: SystemStatus = {
   uptime: 0,
   start_time: 0,
   ws_connected: false,
+  exchange_connected: false,
+  error_message: '',
 };
 
 export const useMarketStore = create<MarketStore>((set) => ({

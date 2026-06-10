@@ -60,6 +60,8 @@ class WebState:
                 'uptime': 0,
                 'start_time': time.time(),
                 'ws_connected': False,
+                'exchange_connected': False,
+                'error_message': '',
             },
         }
 

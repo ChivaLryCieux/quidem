@@ -77,6 +77,8 @@ export interface SystemStatus {
   uptime: number;
   start_time: number;
   ws_connected: boolean;
+  exchange_connected: boolean;
+  error_message: string;
 }
 
 // 完整快照

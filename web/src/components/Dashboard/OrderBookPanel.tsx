@@ -5,9 +5,12 @@ export function OrderBookPanel() {
 
   if (!orderbook) {
     return (
-      <div className="bg-[#1a1a2e] rounded-lg border border-gray-800 p-4 h-full">
-        <div className="text-sm text-gray-500 mb-3">盘口深度</div>
-        <div className="text-center text-gray-600 py-8">等待数据...</div>
+      <div className="halftone-card rounded-sm p-4 h-full">
+        <div className="text-[10px] text-[#555] mb-4 font-mono tracking-widest">ORDER_BOOK</div>
+        <div className="flex flex-col items-center justify-center py-12 text-[#333]">
+          <div className="text-4xl mb-2">◇</div>
+          <div className="text-xs font-mono">AWAITING_DATA...</div>
+        </div>
       </div>
     );
   }
@@ -21,42 +24,42 @@ export function OrderBookPanel() {
   );
 
   return (
-    <div className="bg-[#1a1a2e] rounded-lg border border-gray-800 p-4 h-full">
-      <div className="text-sm text-gray-500 mb-3">盘口深度</div>
+    <div className="halftone-card rounded-sm p-4 h-full">
+      <div className="text-[10px] text-[#555] mb-4 font-mono tracking-widest">ORDER_BOOK</div>
 
       {/* Asks (卖单) */}
-      <div className="space-y-0.5 mb-2">
+      <div className="space-y-0.5 mb-3">
         {asks.map(([price, vol], i) => (
-          <div key={i} className="relative flex justify-between text-xs font-mono">
+          <div key={i} className="relative flex justify-between text-xs font-mono py-0.5">
             <div
-              className="absolute inset-0 bg-red-900/20"
+              className="absolute inset-0 bg-[#e63946]/10"
               style={{ width: `${(vol / maxVol) * 100}%` }}
             />
-            <span className="relative text-red-400 z-10">{price.toFixed(2)}</span>
-            <span className="relative text-gray-400 z-10">{vol.toFixed(2)}</span>
+            <span className="relative text-[#e63946] z-10">{price.toFixed(2)}</span>
+            <span className="relative text-[#666] z-10">{vol.toFixed(3)}</span>
           </div>
         ))}
       </div>
 
       {/* Spread */}
-      <div className="text-center text-xs text-gray-600 py-1 border-y border-gray-800">
+      <div className="text-center text-[10px] text-[#444] py-2 border-y border-[#222] font-mono">
         {orderbook.asks[0] && orderbook.bids[0] && (
           <>
-            Spread: {((orderbook.asks[0][0] - orderbook.bids[0][0]) / orderbook.bids[0][0] * 100).toFixed(4)}%
+            SPREAD: {((orderbook.asks[0][0] - orderbook.bids[0][0]) / orderbook.bids[0][0] * 100).toFixed(4)}%
           </>
         )}
       </div>
 
       {/* Bids (买单) */}
-      <div className="space-y-0.5 mt-2">
+      <div className="space-y-0.5 mt-3">
         {bids.map(([price, vol], i) => (
-          <div key={i} className="relative flex justify-between text-xs font-mono">
+          <div key={i} className="relative flex justify-between text-xs font-mono py-0.5">
             <div
-              className="absolute inset-0 bg-green-900/20"
+              className="absolute inset-0 bg-white/5"
               style={{ width: `${(vol / maxVol) * 100}%` }}
             />
-            <span className="relative text-green-400 z-10">{price.toFixed(2)}</span>
-            <span className="relative text-gray-400 z-10">{vol.toFixed(2)}</span>
+            <span className="relative text-[#888] z-10">{price.toFixed(2)}</span>
+            <span className="relative text-[#666] z-10">{vol.toFixed(3)}</span>
           </div>
         ))}
       </div>

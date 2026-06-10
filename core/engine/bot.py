@@ -71,6 +71,7 @@ class QuantBot:
         self.last_tick_analysis = None
         self.last_tick_price = 0.0
         self.last_btc_price = 0.0
+        self.exchange_connected = False
 
     def _validate_runtime_config(self):
         issues = Config.validate_for_mode(is_live=self.is_live)
@@ -113,21 +114,52 @@ class QuantBot:
     def run(self):
         self.ui.log_startup(self.mode_name)
 
+        # 1. 先启动 Web 服务器（无论交易所连接是否成功）
+        self._start_web_server()
+
+        # 2. 尝试连接交易所
         ok, msg = self.exchange.connect()
         if not ok:
             self.ui.log_msg(f"Connection Failed: {msg}", "error")
+            self.web_state.set_status("exchange_error")
+            self.web_state.update_system(
+                exchange_connected=False,
+                error_message=msg,
+            )
+            self.ui.log_msg("Web GUI is still running. Press 'q' to exit.", "warning")
+
+            # 即使交易所连接失败，也进入主循环（保持 Web GUI 运行）
+            self._run_idle_loop()
             return
+
+        # 交易所连接成功
+        self.exchange_connected = True
         self.ui.log_msg("Exchange Connected", "success")
+        self.web_state.update_system(exchange_connected=True)
 
         self._fetch_balance()
         self._warmup_models()
 
-        # 启动 Web 服务器
-        self._start_web_server()
-
         self.ui.log_msg("System Started, Listening...", "success")
         self.web_state.set_status("running")
 
+        # 正常主循环
+        self._run_main_loop()
+
+    def _run_idle_loop(self):
+        """交易所连接失败时的空闲循环，保持 Web GUI 运行"""
+        while True:
+            try:
+                self._check_user_input()
+                time.sleep(0.5)  # 降低 CPU 占用
+            except KeyboardInterrupt:
+                self._exit_procedure()
+            except Exception as exc:
+                logger.error(f"Idle Loop Error: {exc}")
+                time.sleep(1)
+
+    def _run_main_loop(self):
+        """正常交易主循环"""
         while True:
             try:
                 self._check_user_input()
@@ -163,6 +195,7 @@ class QuantBot:
                 mode="Live" if self.is_live else "Paper",
                 symbol=Config.SYMBOL,
             )
+            self.web_state.set_status("initializing")
             self.web_state.set_ws_connected(True)
 
         except Exception as exc:

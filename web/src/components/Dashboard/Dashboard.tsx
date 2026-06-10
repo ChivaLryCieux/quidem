@@ -24,13 +24,17 @@ export function Dashboard() {
 
         {/* Center: Chart placeholder */}
         <div className="col-span-6">
-          <div className="bg-[#1a1a2e] rounded-lg border border-gray-800 p-4 h-[400px] flex items-center justify-center">
-            <div className="text-center text-gray-500">
-              <p className="text-lg mb-2">📊 K线图表</p>
-              <p className="text-sm">TradingView Lightweight Charts</p>
-              <p className="text-xs mt-2">
-                当前价格: <span className="text-cyan-400 font-mono">{market.price.toFixed(4)}</span>
-              </p>
+          <div className="halftone-card rounded-sm p-4 h-[400px] flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-6xl mb-4 opacity-20">◈</div>
+              <p className="text-lg mb-2 text-[#888] font-mono tracking-wider">CHART_MODULE</p>
+              <p className="text-xs text-[#555] font-mono">TradingView Lightweight Charts</p>
+              <div className="mt-6 pt-4 border-t border-[#222]">
+                <span className="text-xs text-[#555] font-mono">PRICE_FEED: </span>
+                <span className="text-lg font-mono text-[#e63946] text-glow-red">
+                  {market.price.toFixed(4)}
+                </span>
+              </div>
             </div>
           </div>
         </div>
