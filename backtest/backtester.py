@@ -446,24 +446,26 @@ class StrategyBacktesterUnified:
         print(f"📄 交易记录已保存: {fpath}")
 
     def _report(self):
+        from core.analysis.performance import PerformanceAnalyzer
+
         real_trades = [t for t in self.trades if t['mode'] != 'INJECTION']
         if not real_trades:
             print("无有效交易")
             self._plot()
             return
-            
-        wins = [t for t in real_trades if t['pnl'] > 0]
-        losses = [t for t in real_trades if t['pnl'] <= 0]
-        total_pnl = sum(t['pnl'] for t in real_trades)
-        
-        print("\n" + "="*40)
-        print(f"📊 回测统计")
-        print("="*40)
-        print(f"总交易: {len(real_trades)} | 爆仓注入: {self.bankruptcy_count} (${self.total_injected:.0f})")
-        print(f"净盈亏: {total_pnl:.2f} | 最终权益: {self.balance:.2f}")
-        print(f"胜率: {(len(wins)/len(real_trades)*100):.1f}%")
-        print("="*40)
-        
+
+        # 使用PerformanceAnalyzer生成完整报告
+        analyzer = PerformanceAnalyzer(initial_balance=self.initial_balance)
+        for t in real_trades:
+            analyzer.add_trade(t)
+            analyzer.add_equity_snapshot(t.get('exit_time', 0), t.get('balance', 0))
+
+        report = analyzer.analyze()
+        print(analyzer.format_report(report))
+
+        if self.bankruptcy_count > 0:
+            print(f"  ⚠️ 爆仓注入: {self.bankruptcy_count}次 (${self.total_injected:.0f})")
+
         self._plot()
 
     def _plot(self):
