@@ -45,3 +45,26 @@ dist/
 web/node_modules/
 web/dist/
 core/web/static/
+
+# ---- Backtest outputs ----
+backtest/outputs/
+backtest/*.png
+backtest/*.csv
+backtest/*.pkl
+
+# ---- ML model artifacts ----
+*.joblib
+*.h5
+*.pt
+*.onnx
+models/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- Coverage / Testing ----
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
