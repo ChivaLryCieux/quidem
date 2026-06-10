@@ -40,3 +40,8 @@ build/
 dist/
 *.egg-info/
 *.egg
+
+# ---- Frontend ----
+web/node_modules/
+web/dist/
+core/web/static/

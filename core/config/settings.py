@@ -128,6 +128,12 @@ class Config:
     LOG_MAX_BYTES = _env_int("LOG_MAX_BYTES", 10 * 1024 * 1024)  # 10MB
     LOG_BACKUP_COUNT = _env_int("LOG_BACKUP_COUNT", 5)
 
+    # Web GUI 配置
+    WEB_ENABLED = _env_bool("WEB_ENABLED", True)
+    WEB_HOST = os.getenv("WEB_HOST", "127.0.0.1")
+    WEB_PORT = _env_int("WEB_PORT", 8000)
+    WEB_AUTO_OPEN = _env_bool("WEB_AUTO_OPEN", True)
+
     @staticmethod
     def exchange_proxies():
         if not Config.PROXY_ENABLED or not Config.PROXY_URL:

@@ -16,6 +16,8 @@ from core.strategy.brain import StrategyBrain
 from core.ui.display import DisplayManager
 from core.ui.input import KeyListener
 from core.utils.logging_config import setup_logging
+from core.web.state import WebState
+from core.web.runner import WebRunner
 
 init(autoreset=True)
 
@@ -56,6 +58,14 @@ class QuantBot:
         self.alert_manager = AlertManager()
 
         self.redis_client = self._init_redis()
+
+        # Web GUI
+        self.web_state = WebState()
+        self.web_runner = None
+
+        # 将 WebState 注入到 trader 和 alert_manager
+        self.trader.set_web_state(self.web_state)
+        self.alert_manager.set_web_state(self.web_state)
 
         self.current_candle_timestamp = 0
         self.last_tick_analysis = None
@@ -111,7 +121,12 @@ class QuantBot:
 
         self._fetch_balance()
         self._warmup_models()
+
+        # 启动 Web 服务器
+        self._start_web_server()
+
         self.ui.log_msg("System Started, Listening...", "success")
+        self.web_state.set_status("running")
 
         while True:
             try:
@@ -123,6 +138,36 @@ class QuantBot:
             except Exception as exc:
                 logger.error(f"Loop Error: {exc}")
                 time.sleep(1)
+
+    def _start_web_server(self):
+        """启动 Web 服务器"""
+        if not Config.WEB_ENABLED:
+            self.ui.log_msg("Web GUI disabled", "info")
+            return
+
+        try:
+            self.web_runner = WebRunner(
+                state=self.web_state,
+                host=Config.WEB_HOST,
+                port=Config.WEB_PORT,
+                auto_open=Config.WEB_AUTO_OPEN,
+            )
+            self.web_runner.start()
+
+            url = self.web_runner.get_url()
+            self.ui.log_msg(f"Web GUI: {url}", "success")
+
+            # 初始化 Web 状态
+            self.web_state.update_account(
+                balance=self.trader.balance,
+                mode="Live" if self.is_live else "Paper",
+                symbol=Config.SYMBOL,
+            )
+            self.web_state.set_ws_connected(True)
+
+        except Exception as exc:
+            logger.error(f"Web server start failed: {exc}")
+            self.ui.log_msg(f"Web GUI failed: {exc}", "error")
 
     def _fetch_balance(self):
         try:
@@ -254,6 +299,35 @@ class QuantBot:
             reversal=analysis.get('reversal_factor', 0.0),
         )
 
+        # 更新 Web 状态
+        self._update_web_state(price, analysis, unrealized)
+
+    def _update_web_state(self, price, analysis, unrealized_pnl):
+        """更新 Web 共享状态"""
+        if not Config.WEB_ENABLED:
+            return
+
+        # 更新价格
+        self.web_state.update_price(price)
+
+        # 更新策略状态
+        self.web_state.update_strategy(
+            state=self.brain.state,
+            color=self.brain.color,
+            adx=analysis.get('adx', 0.0),
+            macd=analysis.get('macd_histogram', 0.0),
+            reversal=analysis.get('reversal_factor', 0.0),
+            supertrend_5m=analysis.get('supertrend_direction', 0),
+            supertrend_15m=self.brain.signal_engine.supertrend_15m_direction,
+            supertrend_1h=self.brain.signal_engine.supertrend_1h_direction,
+        )
+
+        # 更新持仓
+        self.web_state.update_position(self.trader.position, unrealized_pnl)
+
+        # 更新余额
+        self.web_state.update_balance(self.trader.balance)
+
     def _send_heartbeat(self, price, analysis):
         if not (Config.ENABLE_MAIL_REPORT and self.redis_client):
             return
@@ -291,6 +365,12 @@ class QuantBot:
 
     def _exit_procedure(self):
         logger.info("Stopping...")
+        self.web_state.set_status("stopping")
+
+        # 停止 Web 服务器
+        if self.web_runner:
+            self.web_runner.stop()
+
         self.exchange.close()
 
         if self.trader.position['size'] != 0:

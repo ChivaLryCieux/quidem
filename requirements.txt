@@ -1,11 +1,13 @@
 aiohttp
 ccxt==4.5.22
 colorama==0.4.6
+fastapi==0.109.0
 hmmlearn==0.3.3
 joblib==1.4.2
 matplotlib
 numpy
 pandas==2.0.3
+pydantic==2.5.3
 python-dotenv==1.2.1
 redis==7.2.1
 Requests==2.32.5
@@ -14,4 +16,5 @@ schedule==1.2.2
 scikit_learn
 seaborn==0.13.2
 statsmodels==0.14.2
+uvicorn==0.27.0
 websocket_client==1.8.0

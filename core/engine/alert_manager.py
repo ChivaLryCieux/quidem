@@ -17,10 +17,14 @@ class AlertManager:
     def __init__(self):
         self.mail_service = MailService()
         self.bocpd = BOCPDDetector()
+        self.web_state = None
         self.last_bocpd_cp = None
         self.last_kdj_state = None
         self.adx_alert_active = False
         self.last_macd_cross_state = None
+
+    def set_web_state(self, web_state):
+        self.web_state = web_state
 
     def check_and_alert(self, history_5m, analysis):
         if history_5m is None or history_5m.empty or analysis is None:
@@ -79,6 +83,15 @@ class AlertManager:
             f"<p><b>价格:</b> {price:.4f}</p>"
         )
         self.mail_service.send_alert(subject, html)
+
+        # 更新 Web 状态
+        if self.web_state:
+            self.web_state.add_alert(
+                alert_type="MACD",
+                message=f"MACD交叉预警 | {label} | ADX={adx:.2f}",
+                details={"state": state, "label": label, "macd": macd, "macd_signal": macd_signal, "adx": adx, "time": ts, "price": price},
+            )
+
         self.last_macd_cross_state = state
         logger.warning("MACD cross alert triggered: state=%s, adx=%.2f", state, adx)
 
@@ -105,6 +118,15 @@ class AlertManager:
             f"<p><b>变点索引:</b> {latest_cp}</p>"
         )
         self.mail_service.send_alert(subject, html)
+
+        # 更新 Web 状态
+        if self.web_state:
+            self.web_state.add_alert(
+                alert_type="BOCPD",
+                message=f"BOCPD变点预警 | 价格: {price:.4f}",
+                details={"price": price, "index": latest_cp, "time": ts},
+            )
+
         self.last_bocpd_cp = latest_cp
         logger.warning("BOCPD changepoint alert triggered at index=%s", latest_cp)
 
@@ -146,6 +168,15 @@ class AlertManager:
             f"<p><b>价格:</b> {price:.4f}</p>"
         )
         self.mail_service.send_alert(subject, html)
+
+        # 更新 Web 状态
+        if self.web_state:
+            self.web_state.add_alert(
+                alert_type="KDJ",
+                message=f"KDJ-J值预警 | {label} | J={kdj_j:.2f}",
+                details={"j_value": kdj_j, "adx": adx, "state": state, "time": ts, "price": price},
+            )
+
         self.last_kdj_state = state
         logger.warning("KDJ-J alert triggered: state=%s, j=%.2f, adx=%.2f", state, kdj_j, adx)
 
@@ -172,5 +203,14 @@ class AlertManager:
             f"<p><b>价格:</b> {price:.4f}</p>"
         )
         self.mail_service.send_alert(subject, html)
+
+        # 更新 Web 状态
+        if self.web_state:
+            self.web_state.add_alert(
+                alert_type="ADX",
+                message=f"ADX强趋势预警 | ADX={adx:.2f} > 75",
+                details={"adx": adx, "time": ts, "price": price},
+            )
+
         self.adx_alert_active = True
         logger.warning("ADX alert triggered: adx=%.2f", adx)

@@ -21,6 +21,7 @@ class TradeExecutor:
         self.brain = brain
 
         self.redis_client = None
+        self.web_state = None
         self.balance = Config.PAPER_BALANCE
         self.position = self._empty_position()
 
@@ -34,6 +35,9 @@ class TradeExecutor:
 
     def set_redis_client(self, client):
         self.redis_client = client
+
+    def set_web_state(self, web_state):
+        self.web_state = web_state
 
     def update_balance(self, new_balance):
         self.balance = new_balance
@@ -185,6 +189,19 @@ class TradeExecutor:
             bb_mid=data.get('bb_middle', 0.0),
             st_val=data.get('supertrend_value', 0.0),
         )
+
+        # 更新 Web 状态
+        if self.web_state:
+            side_str = "LONG" if sig == 1 else "SHORT"
+            self.web_state.log_entry(
+                side=side_str,
+                price=price,
+                leverage=lev,
+                sl=self.position['sl'],
+                tp=self.position['tp'],
+                regime=regime,
+            )
+
         self.profit_flip_count, self.was_in_profit = 0, False
         self.max_pnl_pct = 0.0
 
@@ -237,6 +254,16 @@ class TradeExecutor:
 
         self.ui.log_exit(reason, price, net_pnl, fee, self.balance, cd_msg)
         self._report_trade_exit(pos_size, entry, price, net_pnl, fee, reason)
+
+        # 更新 Web 状态
+        if self.web_state:
+            self.web_state.log_exit(
+                reason=reason,
+                price=price,
+                pnl=net_pnl,
+                fee=fee,
+                balance=self.balance,
+            )
 
         self.trade_snapshots = []
         self.last_snapshot_time = 0
