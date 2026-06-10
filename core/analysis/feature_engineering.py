@@ -4,7 +4,10 @@ import pandas as pd
 from core.analysis.indicators import (
     MomentumCalculator, RollingVolatilityCalculator, MathUtils,
     BollingerBands, SuperTrend, MACDCalculator, KDJCalculator,
-    ADXCalculator, VWAPCalculator
+    ADXCalculator, VWAPCalculator,
+    IchimokuCloud, StochasticRSI, OBVCalculator, CCICalculator,
+    WilliamsPercentR, ParabolicSAR, VWMACalculator, ChaikinMoneyFlow,
+    VolumeProfile
 )
 
 
@@ -32,7 +35,18 @@ class FeatureEngineer:
         self.kdj = KDJCalculator(k_period=9, d_period=3, j_smooth=3)
         self.adx = ADXCalculator(period=14)
         self.vwap = VWAPCalculator(period=288)
-        
+
+        # Phase 2: Advanced indicators
+        self.ichimoku = IchimokuCloud()
+        self.stoch_rsi = StochasticRSI()
+        self.obv = OBVCalculator()
+        self.cci = CCICalculator()
+        self.williams_r = WilliamsPercentR()
+        self.psar = ParabolicSAR()
+        self.vwma = VWMACalculator(period=20)
+        self.cmf = ChaikinMoneyFlow()
+        self.volume_profile = VolumeProfile()
+
         # 成交量MA周期
         self.vol_ma_period = 96
 
@@ -110,7 +124,20 @@ class FeatureEngineer:
         # ================================================================
         vwap_result = self.vwap.calculate(history_df)
         k_minus_d = kdj_result['k_minus_d']
-        
+
+        # ================================================================
+        # Phase 2: Advanced indicator calculations
+        # ================================================================
+        ichimoku_result = self.ichimoku.calculate(history_df)
+        stoch_rsi_result = self.stoch_rsi.calculate(history_df)
+        obv_result = self.obv.calculate(history_df)
+        cci_result = self.cci.calculate(history_df)
+        wr_result = self.williams_r.calculate(history_df)
+        psar_result = self.psar.calculate(history_df)
+        vwma_result = self.vwma.calculate(history_df)
+        cmf_result = self.cmf.calculate(history_df)
+        vol_profile_result = self.volume_profile.calculate(history_df)
+
         # ================================================================
         # 构建量化特征向量（兼容返回）
         # ================================================================
@@ -129,7 +156,16 @@ class FeatureEngineer:
             macd_normalized,
             bb_distance,
             float(supertrend_direction),
-            k_minus_d
+            k_minus_d,
+            # Phase 2 features
+            float(ichimoku_result['cloud_signal']),
+            stoch_rsi_result['stoch_rsi_k'] / 100.0,
+            obv_result['obv_trend'],
+            cci_result['cci'] / 200.0,
+            (wr_result['williams_r'] + 50) / 50.0,
+            float(psar_result['sar_direction']),
+            vwma_result['vwma_sma_deviation'] / 10.0,
+            cmf_result['cmf'],
         ]).reshape(1, -1)
         
         # ================================================================
@@ -230,7 +266,56 @@ class FeatureEngineer:
             'volatility_values': volatility_values,
             
             # 盘口信息
-            'obi': obi_value
+            'obi': obi_value,
+
+            # Phase 2: Ichimoku
+            'ichimoku_tenkan': ichimoku_result['tenkan'],
+            'ichimoku_kijun': ichimoku_result['kijun'],
+            'ichimoku_span_a': ichimoku_result['span_a'],
+            'ichimoku_span_b': ichimoku_result['span_b'],
+            'ichimoku_cloud_signal': ichimoku_result['cloud_signal'],
+            'ichimoku_tk_cross': ichimoku_result['tk_cross'],
+
+            # Phase 2: Stochastic RSI
+            'stoch_rsi_k': stoch_rsi_result['stoch_rsi_k'],
+            'stoch_rsi_d': stoch_rsi_result['stoch_rsi_d'],
+            'stoch_rsi_golden': stoch_rsi_result['stoch_rsi_golden'],
+            'stoch_rsi_death': stoch_rsi_result['stoch_rsi_death'],
+
+            # Phase 2: OBV
+            'obv': obv_result['obv'],
+            'obv_trend': obv_result['obv_trend'],
+            'obv_bearish_div': obv_result['obv_bearish_div'],
+            'obv_bullish_div': obv_result['obv_bullish_div'],
+
+            # Phase 2: CCI
+            'cci': cci_result['cci'],
+            'cci_overbought': cci_result['cci_overbought'],
+            'cci_oversold': cci_result['cci_oversold'],
+
+            # Phase 2: Williams %R
+            'williams_r': wr_result['williams_r'],
+            'wr_overbought': wr_result['wr_overbought'],
+            'wr_oversold': wr_result['wr_oversold'],
+
+            # Phase 2: Parabolic SAR
+            'psar': psar_result['sar'],
+            'psar_direction': psar_result['sar_direction'],
+
+            # Phase 2: VWMA
+            'vwma': vwma_result['vwma'],
+            'vwma_deviation': vwma_result['vwma_sma_deviation'],
+            'vwma_bullish': vwma_result['vwma_bullish'],
+
+            # Phase 2: Chaikin Money Flow
+            'cmf': cmf_result['cmf'],
+            'cmf_bullish': cmf_result['cmf_bullish'],
+            'cmf_bearish': cmf_result['cmf_bearish'],
+
+            # Phase 2: Volume Profile
+            'vp_poc': vol_profile_result['poc'],
+            'vp_vah': vol_profile_result['vah'],
+            'vp_val': vol_profile_result['val'],
         }
         
         return tech_features, context
@@ -244,5 +329,14 @@ class FeatureEngineer:
             'macd_normalized',
             'bb_distance',
             'supertrend_direction',
-            'k_minus_d'
+            'k_minus_d',
+            # Phase 2
+            'ichimoku_cloud_signal',
+            'stoch_rsi_k',
+            'obv_trend',
+            'cci_normalized',
+            'williams_r_normalized',
+            'psar_direction',
+            'vwma_deviation',
+            'cmf',
         ]
