@@ -1,37 +1,36 @@
 @import "tailwindcss";
 
 /* ==========================================
-   黑白红配色 + 半调网点风格
+   Light 扁平极简主题（品牌红 + 白底）
    ========================================== */
 
 :root {
-  /* 核心配色 */
-  --bg-primary: #0a0a0a;
-  --bg-secondary: #111111;
-  --bg-card: #141414;
-  --bg-hover: #1a1a1a;
+  /* 背景层 */
+  --bg-page: #f5f5f7;
+  --bg-card: #ffffff;
+  --bg-subtle: #f9fafb;
 
-  --text-primary: #f0f0f0;
-  --text-secondary: #888888;
-  --text-muted: #555555;
+  /* 文字层 */
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+  --text-muted: #9ca3af;
 
-  --red-primary: #e63946;
-  --red-dark: #9b1b22;
-  --red-glow: rgba(230, 57, 70, 0.15);
+  /* 品牌与语义色 */
+  --brand: #e63946;
+  --green: #16a34a;
+  --red: #dc2626;
 
-  --green-primary: #2ecc71;
-  --green-dark: #1a7a42;
-
-  --border-color: #222222;
-  --border-red: rgba(230, 57, 70, 0.3);
+  /* 边框 */
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
 
   font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: dark;
+  color-scheme: light;
   color: var(--text-primary);
-  background-color: var(--bg-primary);
+  background-color: var(--bg-page);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -47,88 +46,35 @@
 
 body {
   min-height: 100vh;
-  /* 半调网点背景 */
-  background-image:
-    radial-gradient(circle, var(--red-primary) 0.5px, transparent 0.5px);
-  background-size: 24px 24px;
-  background-position: 0 0;
-  opacity: 1;
-}
-
-/* 半调网点叠加层 - 更明显的网点效果 */
-body::before {
-  content: '';
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-image:
-    radial-gradient(circle, rgba(230, 57, 70, 0.08) 1px, transparent 1px);
-  background-size: 16px 16px;
-  pointer-events: none;
-  z-index: 0;
+  background-color: var(--bg-page);
 }
 
 #root {
   min-height: 100vh;
-  position: relative;
-  z-index: 1;
 }
 
 /* ==========================================
-   半调网点卡片效果
+   扁平卡片工具类
    ========================================== */
 
-.halftone-card {
+/* 标准卡片：白底 + 1px 边框 + 圆角 */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/* 品牌红强调卡片：顶部品牌色细条 */
+.card-red-accent {
   position: relative;
   background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  overflow: hidden;
-}
-
-.halftone-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-image:
-    radial-gradient(circle, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 8px 8px;
-  pointer-events: none;
-  z-index: 0;
-}
-
-.halftone-card > * {
-  position: relative;
-  z-index: 1;
-}
-
-/* 红色强调的半调效果 */
-.halftone-red {
-  position: relative;
-}
-
-.halftone-red::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 100%;
-  height: 100%;
-  background-image:
-    radial-gradient(circle, var(--red-primary) 0.8px, transparent 0.8px);
-  background-size: 12px 12px;
-  opacity: 0.05;
-  pointer-events: none;
-  mask-image: linear-gradient(to left, black, transparent 60%);
-  -webkit-mask-image: linear-gradient(to left, black, transparent 60%);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--brand);
+  border-radius: 6px;
 }
 
 /* ==========================================
-   自定义滚动条
+   自定义滚动条（浅色）
    ========================================== */
 
 ::-webkit-scrollbar {
@@ -137,52 +83,33 @@ body::before {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--bg-primary);
+  background: var(--bg-page);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #333333;
+  background: var(--border-strong);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--red-primary);
+  background: var(--brand);
 }
 
 /* ==========================================
    动画效果
    ========================================== */
 
-@keyframes pulse-red {
+@keyframes pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  50% { opacity: 0.4; }
 }
 
-@keyframes scanline {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(100%); }
-}
-
-.animate-pulse-red {
-  animation: pulse-red 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-/* 扫描线效果 */
-.scanline::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(to right, transparent, var(--red-primary), transparent);
-  opacity: 0.1;
-  animation: scanline 8s linear infinite;
-  pointer-events: none;
+.animate-pulse-dot {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 /* ==========================================
-   状态指示器
+   状态指示器（连接=绿 / 断开=灰红）
    ========================================== */
 
 .status-dot {
@@ -202,60 +129,28 @@ body::before {
   border-radius: 50%;
   background: inherit;
   opacity: 0.3;
-  animation: pulse-red 2s infinite;
+  animation: pulse 2s infinite;
 }
 
 .status-connected {
-  background: var(--red-primary);
-  box-shadow: 0 0 8px var(--red-primary);
+  background: var(--green);
 }
 
 .status-disconnected {
-  background: #555555;
+  background: var(--red);
+  opacity: 0.5;
 }
 
 /* ==========================================
-   数据闪烁效果
+   数据闪烁效果（浅红高亮）
    ========================================== */
 
-@keyframes flash-red {
+@keyframes flash-update {
   0% { background-color: transparent; }
-  50% { background-color: rgba(230, 57, 70, 0.1); }
+  50% { background-color: rgba(230, 57, 70, 0.08); }
   100% { background-color: transparent; }
 }
 
 .flash-update {
-  animation: flash-red 0.3s ease-out;
-}
-
-/* ==========================================
-   文字效果
-   ========================================== */
-
-.text-glow-red {
-  text-shadow: 0 0 10px rgba(230, 57, 70, 0.5), 0 0 20px rgba(230, 57, 70, 0.2);
-}
-
-.text-glow-green {
-  text-shadow: 0 0 10px rgba(46, 204, 113, 0.5), 0 0 20px rgba(46, 204, 113, 0.2);
-}
-
-/* ==========================================
-   边框效果
-   ========================================== */
-
-.border-glow-red {
-  border-color: var(--red-primary);
-  box-shadow: 0 0 15px rgba(230, 57, 70, 0.1), inset 0 0 15px rgba(230, 57, 70, 0.05);
-}
-
-/* 噪点纹理边框 */
-.border-noise {
-  border: 1px solid var(--border-color);
-  background-image:
-    linear-gradient(var(--bg-card), var(--bg-card)),
-    radial-gradient(circle, var(--red-primary) 1px, transparent 1px);
-  background-size: 100% 100%, 10px 10px;
-  background-origin: padding-box, border-box;
-  background-clip: padding-box, border-box;
+  animation: flash-update 0.3s ease-out;
 }

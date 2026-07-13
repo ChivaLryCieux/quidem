@@ -8,38 +8,38 @@ function App() {
 
   const hasError = system.status === 'exchange_error';
   const statusColor = hasError
-    ? 'text-[#e63946]'
+    ? 'text-[var(--red)]'
     : system.status === 'running'
-      ? 'text-[#2ecc71]'
-      : 'text-[#555]';
+      ? 'text-[var(--green)]'
+      : 'text-[var(--text-muted)]';
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-[#f0f0f0]">
+    <div className="min-h-screen bg-[var(--bg-page)] text-[var(--text-primary)]">
       {/* Header */}
-      <header className="flex items-center justify-between px-6 py-3 border-b border-[#222] bg-[#111] relative scanline">
+      <header className="flex items-center justify-between px-6 py-3 border-b border-[var(--border)] bg-[var(--bg-card)]">
         <div className="flex items-center gap-4">
           {/* Logo */}
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-[#e63946] rounded flex items-center justify-center text-white font-bold text-sm">
+            <div className="w-8 h-8 bg-[var(--brand)] rounded flex items-center justify-center text-white font-bold text-sm">
               Q
             </div>
-            <h1 className="text-lg font-bold tracking-wider text-white">
-              QUIDEM<span className="text-[#e63946]">_</span>CTA
+            <h1 className="text-lg font-bold tracking-wider text-[var(--text-primary)]">
+              QUIDEM<span className="text-[var(--brand)]">_</span>CTA
             </h1>
           </div>
 
           {/* Divider */}
-          <div className="w-px h-6 bg-[#333]" />
+          <div className="w-px h-6 bg-[var(--border-strong)]" />
 
           {/* Symbol & Mode */}
           <div className="flex items-center gap-3">
-            <span className="text-sm text-[#888] font-mono">
+            <span className="text-sm text-[var(--text-secondary)] font-mono">
               {useMarketStore((s) => s.account.symbol)}
             </span>
             <span className={`text-xs px-2 py-0.5 font-mono tracking-wider ${
               useMarketStore((s) => s.account.mode) === 'Live'
-                ? 'bg-[#e63946]/20 text-[#e63946] border border-[#e63946]/30'
-                : 'bg-white/5 text-[#888] border border-[#333]'
+                ? 'bg-[var(--brand)]/10 text-[var(--brand)] border border-[var(--brand)]/30'
+                : 'bg-[var(--bg-subtle)] text-[var(--text-secondary)] border border-[var(--border)]'
             }`}>
               {useMarketStore((s) => s.account.mode).toUpperCase()}
             </span>
@@ -50,7 +50,7 @@ function App() {
           {/* WebSocket Status */}
           <div className="flex items-center gap-2">
             <div className={`status-dot ${connected ? 'status-connected' : 'status-disconnected'}`} />
-            <span className="text-xs font-mono text-[#888]">
+            <span className="text-xs font-mono text-[var(--text-secondary)]">
               WS:{connected ? 'OK' : 'OFF'}
             </span>
           </div>
@@ -58,13 +58,13 @@ function App() {
           {/* Exchange Status */}
           <div className="flex items-center gap-2">
             <div className={`status-dot ${system.exchange_connected ? 'status-connected' : 'status-disconnected'}`} />
-            <span className="text-xs font-mono text-[#888]">
+            <span className="text-xs font-mono text-[var(--text-secondary)]">
               EX:{system.exchange_connected ? 'OK' : 'OFF'}
             </span>
           </div>
 
           {/* Uptime */}
-          <div className="text-xs font-mono text-[#555]">
+          <div className="text-xs font-mono text-[var(--text-muted)]">
             T+{formatUptime(system.uptime)}
           </div>
 
@@ -77,12 +77,12 @@ function App() {
 
       {/* Error Banner */}
       {hasError && (
-        <div className="bg-[#e63946]/10 border-b border-[#e63946]/30 px-6 py-3">
+        <div className="bg-[var(--brand)]/5 border-b border-[var(--brand)]/20 px-6 py-3">
           <div className="flex items-center gap-3">
-            <span className="text-[#e63946] text-lg">◈</span>
+            <span className="text-[var(--red)] text-lg">◈</span>
             <div>
-              <div className="text-xs font-mono text-[#e63946] tracking-wider">EXCHANGE_CONNECTION_FAILED</div>
-              <div className="text-xs font-mono text-[#888] mt-1">
+              <div className="text-xs font-mono text-[var(--red)] tracking-wider">EXCHANGE_CONNECTION_FAILED</div>
+              <div className="text-xs font-mono text-[var(--text-secondary)] mt-1">
                 {system.error_message || 'Unable to connect to exchange. Web GUI is still running.'}
               </div>
             </div>
