@@ -41,12 +41,14 @@
 }
 
 body {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background-color: var(--bg-page);
 }
 
 #root {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 /* Premium Card Style: Flat, very clean border, subtle shadow */

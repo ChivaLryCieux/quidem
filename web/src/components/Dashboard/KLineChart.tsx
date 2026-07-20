@@ -22,7 +22,7 @@ export function KLineChart() {
     // 创建图表实例
     const chart = createChart(chartContainerRef.current, {
       width: chartContainerRef.current.clientWidth,
-      height: 420,
+      height: chartContainerRef.current.clientHeight || 420,
       layout: {
         background: { color: '#ffffff' },
         textColor: '#64748b',
@@ -89,7 +89,10 @@ export function KLineChart() {
     // 监听容器大小自适应
     const handleResize = () => {
       if (chartContainerRef.current && chartRef.current) {
-        chartRef.current.resize(chartContainerRef.current.clientWidth, 420);
+        chartRef.current.resize(
+          chartContainerRef.current.clientWidth,
+          chartContainerRef.current.clientHeight || 420
+        );
       }
     };
     const resizeObserver = new ResizeObserver(handleResize);
@@ -225,7 +228,7 @@ export function KLineChart() {
   }, [price]);
 
   return (
-    <div className="relative card p-4 w-full bg-white">
+    <div className="relative card p-4 w-full h-full bg-white flex flex-col overflow-hidden">
       {/* 顶部行情看板浮层 */}
       <div className="absolute left-6 top-6 z-10 flex items-center gap-4 bg-white/80 backdrop-blur-xs py-1 px-2.5 rounded border border-slate-100">
         <span className="text-sm font-bold tracking-wider text-slate-800">{symbol}</span>
@@ -245,7 +248,7 @@ export function KLineChart() {
         </span>
       </div>
 
-      <div ref={chartContainerRef} className="w-full h-[420px]" />
+      <div ref={chartContainerRef} className="w-full flex-1 min-h-0 mt-8" />
     </div>
   );
 }

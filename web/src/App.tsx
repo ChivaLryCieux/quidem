@@ -86,7 +86,7 @@ function App() {
       )}
 
       {/* Main Content */}
-      <main className="p-4">
+      <main className={`p-4 overflow-hidden ${hasError ? 'h-[calc(100vh-125px)]' : 'h-[calc(100vh-57px)]'}`}>
         <Dashboard />
       </main>
     </div>
