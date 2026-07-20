@@ -97,7 +97,8 @@ class SnapshotResponse(BaseModel):
 
 class ControlRequest(BaseModel):
     """控制请求"""
-    action: str  # 'pause', 'resume', 'exit'
+    action: str  # 'switch_mode', 'pause', 'resume', 'exit'
+    mode: Optional[str] = None  # 目标模式 'paper'/'live'（仅 action='switch_mode' 时使用）
 
 
 class ControlResponse(BaseModel):

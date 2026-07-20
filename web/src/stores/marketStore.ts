@@ -25,6 +25,10 @@ interface MarketStore {
   connected: boolean;
   lastUpdate: number;
 
+  // 模式切换
+  modeSwitching: boolean;
+  modeSwitchError: string | null;
+
   // Actions
   setSnapshot: (snapshot: Snapshot) => void;
   updateMarket: (data: Partial<MarketData>) => void;
@@ -37,6 +41,7 @@ interface MarketStore {
   updateSystem: (data: Partial<SystemStatus>) => void;
   setConnected: (connected: boolean) => void;
   handleMessage: (msg: WSMessage) => void;
+  switchMode: (mode: 'paper' | 'live') => Promise<{ success: boolean; message: string }>;
 }
 
 const defaultMarket: MarketData = {
@@ -84,6 +89,7 @@ const defaultSystem: SystemStatus = {
   ws_connected: false,
   exchange_connected: false,
   error_message: '',
+  trading_mode: 'dashboard',
 };
 
 export const useMarketStore = create<MarketStore>((set) => ({
@@ -97,6 +103,9 @@ export const useMarketStore = create<MarketStore>((set) => ({
 
   connected: false,
   lastUpdate: 0,
+
+  modeSwitching: false,
+  modeSwitchError: null,
 
   setSnapshot: (snapshot) =>
     set({
@@ -196,6 +205,29 @@ export const useMarketStore = create<MarketStore>((set) => ({
         // 心跳，只更新时间
         set({ lastUpdate: Date.now() });
         break;
+    }
+  },
+
+  switchMode: async (mode) => {
+    set({ modeSwitching: true, modeSwitchError: null });
+    try {
+      const resp = await fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'switch_mode', mode }),
+      });
+      const result = await resp.json();
+      if (!result.success) {
+        set({ modeSwitching: false, modeSwitchError: result.message || '切换失败' });
+        return { success: false, message: result.message || '切换失败' };
+      }
+      // 成功后由 WS 推送 system.trading_mode 更新，这里只清状态
+      set({ modeSwitching: false, modeSwitchError: null });
+      return { success: true, message: result.message || '切换成功' };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      set({ modeSwitching: false, modeSwitchError: msg });
+      return { success: false, message: msg };
     }
   },
 }));

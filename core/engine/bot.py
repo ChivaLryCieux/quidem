@@ -2,6 +2,7 @@ import concurrent.futures
 import json
 import logging
 import sys
+import threading
 import time
 
 import redis
@@ -9,6 +10,7 @@ from colorama import init
 
 from core.config.exchange import ExchangeService
 from core.config.settings import Config
+from core.config.mode import TradingMode, can_switch, parse_mode
 from core.engine.trader import TradeExecutor
 from core.engine.alert_manager import AlertManager
 from core.risk.manager import RiskManager
@@ -37,18 +39,18 @@ class QuantBot:
     WARMUP_TIMEOUT_SECONDS = 30
     LOOP_SLEEP_SECONDS = 0.05
 
-    def __init__(self, mode_override=None):
+    def __init__(self):
         Config.setup_proxy()
         self.ui = DisplayManager()
         self.key_listener = KeyListener()
 
-        self.mode = self._get_mode(mode_override)
-        if self.mode == '0':
-            sys.exit(0)
+        # 默认进入看盘模式（不交易）；模式可由 WebUI 运行时切换
+        self.trading_mode = TradingMode.DASHBOARD
+        self.is_live = False
+        self.mode_name = self.trading_mode.label
+        self._mode_lock = threading.Lock()
+        logger.info(f"Initial Mode: {self.mode_name} (运行时可在 WebUI 切换)")
 
-        self.is_live = self.mode == '2'
-        self.mode_name = "实盘" if self.is_live else "模拟盘"
-        logger.info(f"Mode Set: {self.mode_name}")
         self._validate_runtime_config()
 
         self.exchange = ExchangeService(self.is_live)
@@ -74,6 +76,7 @@ class QuantBot:
         self.exchange_connected = False
 
     def _validate_runtime_config(self):
+        # 初始 DASHBOARD 模式不要求 API Key；切换到 LIVE 时由 switch_mode 校验
         issues = Config.validate_for_mode(is_live=self.is_live)
         if not issues:
             return
@@ -82,20 +85,93 @@ class QuantBot:
             logger.error("Config validation failed: %s", issue)
         raise SystemExit("配置校验失败，请修正 .env 或 core/config/settings.py 后重试")
 
-    def _get_mode(self, override):
-        if override:
-            return override
+    async def handle_control(self, request):
+        """WebUI 控制命令路由（由 /api/control 调用）"""
+        action = request.action
+        if action == "switch_mode":
+            if not request.mode:
+                raise ValueError("switch_mode 需要 mode 参数")
+            return self.switch_mode(request.mode)
+        elif action == "exit":
+            self._exit_procedure()
+            return "Exiting..."
+        elif action in ("pause", "resume"):
+            return f"Action {action} acknowledged (no-op)"
+        else:
+            raise ValueError(f"Unknown action: {action}")
 
-        logger.info("请选择模式: [0] 退出 | [1] 模拟盘 (Paper) | [2] 实盘 (Live)")
-        try:
-            sys.stdout.flush()
-            print("请输入数字: ", end="", flush=True)
-            choice = input().strip()
-            if choice in ['0', '1', '2']:
-                return choice
-        except Exception:
-            pass
-        return '0'
+    def switch_mode(self, target_mode_str):
+        """切换交易模式（仅允许单向升级：DASHBOARD -> PAPER -> LIVE）
+
+        切换到 LIVE 需校验 API Key；有持仓时禁止切换。
+        返回 (success: bool, message: str)
+        """
+        target = parse_mode(target_mode_str)
+
+        with self._mode_lock:
+            current = self.trading_mode
+
+            # 1. 单向升级校验
+            if not can_switch(current, target):
+                msg = f"不允许降级或同级切换: {current.value} -> {target.value}"
+                logger.warning(msg)
+                return False, msg
+
+            # 2. 无持仓校验
+            if self.trader.position['size'] != 0:
+                msg = f"当前有持仓，禁止切换模式 (size={self.trader.position['size']})"
+                logger.warning(msg)
+                return False, msg
+
+            # 3. LIVE 模式校验 API Key
+            if target == TradingMode.LIVE:
+                issues = Config.validate_for_mode(is_live=True)
+                if issues:
+                    msg = f"实盘模式校验失败: {'; '.join(issues)}"
+                    logger.error(msg)
+                    return False, msg
+
+            # 4. 重建 ExchangeService 并重连
+            old_exchange = self.exchange
+            try:
+                self.ui.log_msg(f"正在切换到 {target.label} 模式...", "info")
+
+                new_is_live = (target == TradingMode.LIVE)
+                self.exchange = ExchangeService(new_is_live)
+                ok, err_msg = self.exchange.connect()
+                if not ok:
+                    # 回滚：恢复旧 exchange
+                    self.exchange = old_exchange
+                    msg = f"切换失败: 交易所重连失败 ({err_msg})"
+                    logger.error(msg)
+                    return False, msg
+
+                old_exchange.close()
+
+                self.is_live = new_is_live
+                self.trader.exchange = self.exchange
+                self.trading_mode = target
+                self.mode_name = target.label
+
+                # 5. 更新余额与 Web 状态
+                self._fetch_balance()
+                self.web_state.set_trading_mode(target.value)
+                self.web_state.update_account(
+                    balance=self.trader.balance,
+                    mode="Live" if self.is_live else "Paper" if target == TradingMode.PAPER else "Dashboard",
+                    symbol=Config.SYMBOL,
+                )
+
+                self.ui.log_msg(f"✅ 已切换到 {target.label} 模式", "success")
+                logger.info(f"Trading mode switched: {current.value} -> {target.value}")
+                return True, f"已切换到 {target.label} 模式"
+            except Exception as exc:
+                # 异常回滚
+                self.exchange = old_exchange
+                self.trader.exchange = old_exchange
+                msg = f"切换模式异常: {exc}"
+                logger.exception("switch_mode failed")
+                return False, msg
 
     def _init_redis(self):
         if not Config.ENABLE_MAIL_REPORT:
@@ -112,7 +188,7 @@ class QuantBot:
             return None
 
     def run(self):
-        self.ui.log_startup(self.mode_name)
+        self.ui.log_startup()
 
         # 1. 先启动 Web 服务器（无论交易所连接是否成功）
         self._start_web_server()
@@ -183,6 +259,7 @@ class QuantBot:
                 host=Config.WEB_HOST,
                 port=Config.WEB_PORT,
                 auto_open=Config.WEB_AUTO_OPEN,
+                control_callback=self.handle_control,
             )
             self.web_runner.start()
 
@@ -192,11 +269,12 @@ class QuantBot:
             # 初始化 Web 状态
             self.web_state.update_account(
                 balance=self.trader.balance,
-                mode="Live" if self.is_live else "Paper",
+                mode="Dashboard",
                 symbol=Config.SYMBOL,
             )
             self.web_state.set_status("initializing")
             self.web_state.set_ws_connected(True)
+            self.web_state.set_trading_mode(self.trading_mode.value)
 
         except Exception as exc:
             logger.error(f"Web server start failed: {exc}")
@@ -209,7 +287,7 @@ class QuantBot:
                 self.ui.log_msg("Failed to fetch balance", "error")
                 return
 
-            mode_label = "实盘" if self.is_live else "模拟盘"
+            mode_label = self.trading_mode.label
             self.ui.log_msg(
                 f"{mode_label} Balance: Free ${info['free']:.2f} | Total ${info['total']:.2f}",
                 "success",
@@ -289,7 +367,10 @@ class QuantBot:
         self._ingest_realtime_candles(c_5m, c_15m, c_1h, btc_chg)
 
         analysis = self.brain.analyze(book) if book else None
-        if self.trader.position['size'] == 0 and analysis:
+        # 仅在非看盘模式下尝试开仓；持仓管理（上方）对遗留持仓仍生效
+        if (self.trading_mode != TradingMode.DASHBOARD
+                and self.trader.position['size'] == 0
+                and analysis):
             self.trader.tick(curr_price, fr, analysis, timestamp)
 
         self._update_ui(curr_price, analysis)

@@ -57,29 +57,48 @@ class DisplayManager:
         self._live: Optional[Live] = None
         self._status_table: Optional[Table] = None
 
-    def log_startup(self, mode_name: str, strategy_desc: str = ""):
-        """显示启动信息"""
+    def log_startup(self):
+        """显示启动信息面板（项目名、启动日期、模式、WebUI 地址等）"""
         self.console.clear()
 
-        # 创建启动面板
+        from core.config.mode import TradingMode
+
+        # 标题：◈ QUIDEM_CTA
         title_text = Text()
         title_text.append("◈ ", style='red bold')
         title_text.append("QUIDEM", style='white bold')
         title_text.append("_", style='red bold')
         title_text.append("CTA", style='white bold')
 
-        content = Text()
-        content.append(f"\n  Symbol: ", style='dim')
-        content.append(f"{Config.SYMBOL}", style='cyan bold')
-        content.append(f"\n  Mode:   ", style='dim')
-        content.append(f"{mode_name}", style='green bold' if mode_name == "模拟盘" else 'red bold')
+        # 启动日期与时间
+        now = datetime.now()
+        start_time_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-        if strategy_desc:
-            content.append(f"\n  Strategy: ", style='dim')
-            content.append(f"{strategy_desc}", style='yellow')
+        # WebUI 地址
+        web_url = f"http://{Config.WEB_HOST}:{Config.WEB_PORT}"
+
+        # 默认模式
+        mode_label = TradingMode.DASHBOARD.label
+
+        content = Text()
+        content.append(f"\n  Symbol:    ", style='dim')
+        content.append(f"{Config.SYMBOL}", style='cyan bold')
+        content.append(f"\n  Mode:      ", style='dim')
+        content.append(f"{mode_label} (看盘，不交易)", style='yellow bold')
+        content.append(f"\n  Started:   ", style='dim')
+        content.append(f"{start_time_str}", style='white')
+        content.append(f"\n  WebUI:     ", style='dim')
+        content.append(f"{web_url}", style='green')
+        content.append(f"\n  Exchange:  ", style='dim')
+        content.append(f"Binance Futures", style='white')
 
         content.append(f"\n\n  ", style='dim')
-        content.append("━" * 36, style='dim')
+        content.append("━" * 40, style='dim')
+
+        content.append(f"\n  ", style='dim')
+        content.append("正在连接交易所并打开浏览器...", style='cyan')
+        content.append(f"\n  ", style='dim')
+        content.append("模式可在 WebUI 顶部切换 (Dashboard → Paper → Live)", style='dim italic')
 
         panel = Panel(
             content,

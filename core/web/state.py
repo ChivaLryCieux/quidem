@@ -62,6 +62,7 @@ class WebState:
                 'ws_connected': False,
                 'exchange_connected': False,
                 'error_message': '',
+                'trading_mode': 'dashboard',
             },
         }
 
@@ -248,6 +249,10 @@ class WebState:
     def set_ws_connected(self, connected: bool) -> None:
         """设置 WebSocket 连接状态"""
         self.update_system(ws_connected=connected)
+
+    def set_trading_mode(self, mode: str) -> None:
+        """设置交易模式（dashboard / paper / live）"""
+        self.update_system(trading_mode=mode)
 
     # ==================== 数据获取 ====================
 

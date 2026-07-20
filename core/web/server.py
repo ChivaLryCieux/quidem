@@ -104,7 +104,7 @@ def create_app(state: WebState, control_callback=None) -> FastAPI:
             )
 
         try:
-            result = await _control_callback(request.action)
+            result = await _control_callback(request)
             return ControlResponse(
                 success=True,
                 message=result or f"Action {request.action} executed"

@@ -79,7 +79,11 @@ export interface SystemStatus {
   ws_connected: boolean;
   exchange_connected: boolean;
   error_message: string;
+  trading_mode: 'dashboard' | 'paper' | 'live';
 }
+
+// 交易模式
+export type TradingMode = 'dashboard' | 'paper' | 'live';
 
 // 完整快照
 export interface Snapshot {

@@ -1,6 +1,7 @@
 import { useWebSocket } from './hooks/useWebSocket';
 import { useMarketStore } from './stores/marketStore';
 import { Dashboard } from './components/Dashboard/Dashboard';
+import { ModeSelector } from './components/ModeSelector/ModeSelector';
 
 function App() {
   const { connected } = useWebSocket();
@@ -36,13 +37,7 @@ function App() {
             <span className="text-sm text-[var(--text-secondary)] font-mono">
               {useMarketStore((s) => s.account.symbol)}
             </span>
-            <span className={`text-xs px-2 py-0.5 font-mono tracking-wider ${
-              useMarketStore((s) => s.account.mode) === 'Live'
-                ? 'bg-[var(--brand)]/10 text-[var(--brand)] border border-[var(--brand)]/30'
-                : 'bg-[var(--bg-subtle)] text-[var(--text-secondary)] border border-[var(--border)]'
-            }`}>
-              {useMarketStore((s) => s.account.mode).toUpperCase()}
-            </span>
+            <ModeSelector />
           </div>
         </div>
 
