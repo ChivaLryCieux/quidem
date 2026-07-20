@@ -352,6 +352,10 @@ class QuantBot:
         if not c_5m:
             return
 
+        # 更新 Web 盘口五档挂单数据
+        if book and Config.WEB_ENABLED:
+            self.web_state.update_orderbook(book)
+
         timestamp = c_5m[0]
         curr_price = float(c_5m[4])
         self.last_tick_price = curr_price
@@ -381,7 +385,7 @@ class QuantBot:
             history_list = self.brain.history_5m[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
             self.web_state.update_market(kline_5m=history_list)
 
-        analysis = self.brain.analyze(book) if book else None
+        analysis = self.brain.analyze(book)
         # 仅在非看盘模式下尝试开仓；持仓管理（上方）对遗留持仓仍生效
         if (self.trading_mode != TradingMode.DASHBOARD
                 and self.trader.position['size'] == 0

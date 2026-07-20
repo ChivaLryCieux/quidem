@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, HistogramSeries } from 'lightweight-charts';
 import type { IChartApi, ISeriesApi, CandlestickData, HistogramData } from 'lightweight-charts';
 import { useMarketStore } from '../../stores/marketStore';
@@ -8,7 +8,8 @@ export function KLineChart() {
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
-  const lastCandleRef = useRef<any>(null);
+   const lastCandleRef = useRef<any>(null);
+   const [overlayCandle, setOverlayCandle] = useState<any>(null);
 
   const klineData = useMarketStore((s) => s.market.kline_5m);
   const price = useMarketStore((s) => s.market.price);
@@ -145,13 +146,15 @@ export function KLineChart() {
         chartRef.current.timeScale().fitContent();
       }
 
-      // 保存最后一根蜡烛作为实时更新的基底
+      // 保存最后一根蜡烛作为实时更新的基底并推入状态
       if (formattedCandles.length > 0) {
         const lastIndex = formattedCandles.length - 1;
-        lastCandleRef.current = {
+        const last = {
           ...formattedCandles[lastIndex],
           volume: formattedVolume[lastIndex].value,
         };
+        lastCandleRef.current = last;
+        setOverlayCandle(last);
       }
     } catch (e) {
       console.error('Failed to parse kline history:', e);
@@ -208,12 +211,14 @@ export function KLineChart() {
         color: price >= last.open ? 'rgba(16, 185, 129, 0.12)' : 'rgba(244, 63, 94, 0.12)',
       });
 
-      lastCandleRef.current = {
+      const updated = {
         ...lastCandleRef.current,
         high: updatedCandle.high,
         low: updatedCandle.low,
         close: price,
       };
+      lastCandleRef.current = updated;
+      setOverlayCandle(updated);
     }
 
     candleSeriesRef.current.update(updatedCandle);
@@ -227,16 +232,16 @@ export function KLineChart() {
         <span className="text-xs font-mono px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">5m</span>
         <div className="h-3 w-px bg-slate-200" />
         <span className="text-xs font-mono text-slate-500">
-          O: <span className="font-semibold text-slate-700">{lastCandleRef.current?.open?.toFixed(2) || '—'}</span>
+          O: <span className="font-semibold text-slate-700">{overlayCandle?.open?.toFixed(2) || '—'}</span>
         </span>
         <span className="text-xs font-mono text-slate-500">
-          H: <span className="font-semibold text-emerald-500">{lastCandleRef.current?.high?.toFixed(2) || '—'}</span>
+          H: <span className="font-semibold text-emerald-500">{overlayCandle?.high?.toFixed(2) || '—'}</span>
         </span>
         <span className="text-xs font-mono text-slate-500">
-          L: <span className="font-semibold text-rose-500">{lastCandleRef.current?.low?.toFixed(2) || '—'}</span>
+          L: <span className="font-semibold text-rose-500">{overlayCandle?.low?.toFixed(2) || '—'}</span>
         </span>
         <span className="text-xs font-mono text-slate-500">
-          C: <span className="font-semibold text-slate-700">{lastCandleRef.current?.close?.toFixed(2) || '—'}</span>
+          C: <span className="font-semibold text-slate-700">{overlayCandle?.close?.toFixed(2) || '—'}</span>
         </span>
       </div>
 

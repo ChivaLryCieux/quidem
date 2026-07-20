@@ -124,6 +124,9 @@ def create_app(state: WebState, control_callback=None) -> FastAPI:
         await websocket.accept()
         logger.info("WebSocket client connected")
 
+        # 保存当前的 FastAPI 事件循环
+        loop = asyncio.get_running_loop()
+
         # 添加订阅
         async def send_message(message: str):
             try:
@@ -134,9 +137,8 @@ def create_app(state: WebState, control_callback=None) -> FastAPI:
         # 同步回调包装
         def sync_callback(message: str):
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.ensure_future(send_message(message))
+                # 跨线程安全分发协程到 FastAPI 的事件循环执行
+                asyncio.run_coroutine_threadsafe(send_message(message), loop)
             except Exception:
                 pass
 

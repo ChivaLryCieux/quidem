@@ -121,6 +121,7 @@ class WebState:
         """更新订单簿"""
         with self._lock:
             self._data['market']['orderbook'] = orderbook
+        self._notify_subscribers('market', self._data['market'])
 
     def update_kline(self, timeframe: str, kline: List) -> None:
         """更新K线数据"""
