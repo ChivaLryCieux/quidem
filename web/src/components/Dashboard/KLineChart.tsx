@@ -11,9 +11,37 @@ export function KLineChart() {
    const lastCandleRef = useRef<any>(null);
    const [overlayCandle, setOverlayCandle] = useState<any>(null);
 
-  const klineData = useMarketStore((s) => s.market.kline_5m);
+  const [timeframe, setTimeframe] = useState<'5m' | '15m' | '1h' | '1d'>('5m');
+  const [switchingSymbol, setSwitchingSymbol] = useState<string | null>(null);
+
+  const klineData = useMarketStore((s) => {
+    switch (timeframe) {
+      case '5m': return s.market.kline_5m;
+      case '15m': return s.market.kline_15m;
+      case '1h': return s.market.kline_1h;
+      case '1d': return s.market.kline_1d;
+      default: return s.market.kline_5m;
+    }
+  });
   const price = useMarketStore((s) => s.market.price);
   const symbol = useMarketStore((s) => s.account.symbol);
+
+  const currentBaseSymbol = symbol.split('/')[0].split('-')[0].toUpperCase();
+
+  const handleSymbolSwitch = async (sym: string) => {
+    setSwitchingSymbol(sym);
+    try {
+      await fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'switch_symbol', symbol: sym }),
+      });
+    } catch (e) {
+      console.error('Failed to switch symbol:', e);
+    } finally {
+      setSwitchingSymbol(null);
+    }
+  };
 
   // 1. 初始化图表
   useEffect(() => {
@@ -104,6 +132,12 @@ export function KLineChart() {
     };
   }, []);
 
+  // 周期切换时立即清空历史最后一根蜡烛缓存，防止 Tick 实时更新与历史载入产生时间戳冲突（避免图表崩溃）
+  useEffect(() => {
+    lastCandleRef.current = null;
+    setOverlayCandle(null);
+  }, [timeframe]);
+
   // 2. 载入历史 K 线数据
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !klineData || klineData.length === 0) return;
@@ -170,9 +204,14 @@ export function KLineChart() {
 
     const last = lastCandleRef.current;
     
-    // 计算当前时间戳所属的 5m 蜡烛开始时间 (300 秒)
+    // 根据当前选中的 timeframe 计算时间间隔（秒）
+    let tf_sec = 300;
+    if (timeframe === '15m') tf_sec = 900;
+    else if (timeframe === '1h') tf_sec = 3600;
+    else if (timeframe === '1d') tf_sec = 86400;
+
     const nowSec = Math.floor(Date.now() / 1000);
-    const currentCandleTime = Math.floor(nowSec / 300) * 300;
+    const currentCandleTime = Math.floor(nowSec / tf_sec) * tf_sec;
 
     let updatedCandle: CandlestickData;
 
@@ -185,8 +224,8 @@ export function KLineChart() {
         low: price,
         close: price,
       };
-      
-      // 更新成交量（新蜡烛初始为0或微小值）
+
+      // 在成交量图系列里插入占位小柱子
       volumeSeriesRef.current.update({
         time: currentCandleTime as any,
         value: 0.1,
@@ -225,30 +264,82 @@ export function KLineChart() {
     }
 
     candleSeriesRef.current.update(updatedCandle);
-  }, [price]);
+  }, [price, timeframe]);
 
   return (
     <div className="relative card p-4 w-full h-full bg-white flex flex-col overflow-hidden">
-      {/* 顶部行情看板浮层 */}
-      <div className="absolute left-6 top-6 z-10 flex items-center gap-4 bg-white/80 backdrop-blur-xs py-1 px-2.5 rounded border border-slate-100">
-        <span className="text-sm font-bold tracking-wider text-slate-800">{symbol}</span>
-        <span className="text-xs font-mono px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">5m</span>
-        <div className="h-3 w-px bg-slate-200" />
-        <span className="text-xs font-mono text-slate-500">
-          O: <span className="font-semibold text-slate-700">{overlayCandle?.open?.toFixed(2) || '—'}</span>
-        </span>
-        <span className="text-xs font-mono text-slate-500">
-          H: <span className="font-semibold text-emerald-500">{overlayCandle?.high?.toFixed(2) || '—'}</span>
-        </span>
-        <span className="text-xs font-mono text-slate-500">
-          L: <span className="font-semibold text-rose-500">{overlayCandle?.low?.toFixed(2) || '—'}</span>
-        </span>
-        <span className="text-xs font-mono text-slate-500">
-          C: <span className="font-semibold text-slate-700">{overlayCandle?.close?.toFixed(2) || '—'}</span>
-        </span>
+      {/* 顶部行情及控制条 */}
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-4 select-none">
+        <div className="flex items-center gap-4 bg-slate-50 py-1 px-3 rounded-lg border border-slate-100">
+          <span className="text-sm font-bold tracking-wider text-slate-800">{symbol}</span>
+          <span className="text-xs font-mono px-1.5 py-0.5 bg-slate-200 text-slate-600 rounded">{timeframe}</span>
+          <div className="h-3 w-px bg-slate-200" />
+          <span className="text-xs font-mono text-slate-500">
+            O: <span className="font-semibold text-slate-700">{overlayCandle?.open?.toFixed(2) || '—'}</span>
+          </span>
+          <span className="text-xs font-mono text-slate-500">
+            H: <span className="font-semibold text-emerald-500">{overlayCandle?.high?.toFixed(2) || '—'}</span>
+          </span>
+          <span className="text-xs font-mono text-slate-500">
+            L: <span className="font-semibold text-rose-500">{overlayCandle?.low?.toFixed(2) || '—'}</span>
+          </span>
+          <span className="text-xs font-mono text-slate-500">
+            C: <span className="font-semibold text-slate-700">{overlayCandle?.close?.toFixed(2) || '—'}</span>
+          </span>
+        </div>
+
+        {/* 右上角标的与周期选择器 */}
+        <div className="flex items-center gap-3">
+          {/* 标的选择器 (BTC, ETH, SOL) */}
+          <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+            {['BTC', 'ETH', 'SOL'].map((sym) => {
+              const isActive = currentBaseSymbol === sym;
+              const isPending = switchingSymbol === sym;
+              return (
+                <button
+                  key={sym}
+                  onClick={() => !isActive && !switchingSymbol && handleSymbolSwitch(sym)}
+                  disabled={!!switchingSymbol}
+                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
+                      : 'text-slate-500 hover:text-slate-800'
+                  } ${isPending ? 'animate-pulse' : ''}`}
+                >
+                  {isPending ? `⏳ ${sym}` : sym}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 周期选择器 (5m, 15m, 1h, 1d) */}
+          <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+            {[
+              { label: '5m', value: '5m' },
+              { label: '15m', value: '15m' },
+              { label: '1h', value: '1h' },
+              { label: '1d', value: '1d' }
+            ].map((tf) => {
+              const isActive = timeframe === tf.value;
+              return (
+                <button
+                  key={tf.value}
+                  onClick={() => setTimeframe(tf.value as any)}
+                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  {tf.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
-      <div ref={chartContainerRef} className="w-full flex-1 min-h-0 mt-8" />
+      <div ref={chartContainerRef} className="w-full flex-1 min-h-0" />
     </div>
   );
 }

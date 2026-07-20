@@ -41,6 +41,9 @@ class StrategyBrain:
         # 1h K线历史数据 (刻时模型: 宏观趋势确认)
         self.history_1h = pd.DataFrame(columns=self.HISTORY_COLUMNS)
         
+        # 1d K线历史数据
+        self.history_1d = pd.DataFrame(columns=self.HISTORY_COLUMNS)
+        
         # 缓存的分析数据
         self.cached_analysis_data = None
         
@@ -93,6 +96,9 @@ class StrategyBrain:
             if len(self.history_1h) >= 30:
                 st_result = self.supertrend_1h.calculate(self.history_1h)
                 self.signal_engine.update_1h_supertrend(st_result['direction'])
+
+        elif timeframe == '1d':
+            self.history_1d = self._append_history(self.history_1d, new_row, max_length=100)
 
     def _normalize_candle(self, item):
         """将K线数据标准化为7字段。"""

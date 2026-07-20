@@ -14,6 +14,7 @@ class MarketData(BaseModel):
     kline_5m: Optional[List[Any]] = None
     kline_15m: Optional[List[Any]] = None
     kline_1h: Optional[List[Any]] = None
+    kline_1d: Optional[List[Any]] = None
     orderbook: Optional[Dict[str, Any]] = None
     funding_rate: float = 0.0
     btc_price: float = 0.0
@@ -100,8 +101,9 @@ class SnapshotResponse(BaseModel):
 
 class ControlRequest(BaseModel):
     """控制请求"""
-    action: str  # 'switch_mode', 'pause', 'resume', 'exit'
-    mode: Optional[str] = None  # 目标模式 'paper'/'live'（仅 action='switch_mode' 时使用）
+    action: str  # 'switch_mode', 'switch_symbol', 'pause', 'resume', 'exit'
+    mode: Optional[str] = None  # 目标模式 'paper'/'live'
+    symbol: Optional[str] = None  # 目标标的 'BTC'/'ETH'/'SOL'等
 
 
 class ControlResponse(BaseModel):

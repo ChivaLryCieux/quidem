@@ -2,6 +2,7 @@ import json
 import logging
 import sys
 import threading
+import concurrent.futures
 import time
 from datetime import datetime, timezone, timedelta
 
@@ -267,6 +268,7 @@ class ExchangeService:
         self.symbol = Config.SYMBOL
         self.is_domestic = self.symbol.lower().startswith(('sh', 'sz'))
         self.is_rest_only = Config.BINANCE_REST_ONLY
+        self.api_lock = threading.Lock()
 
         if self.is_domestic:
             logger.info(f"Initialized domestic ExchangeService for A-shares: {self.symbol}")
@@ -333,7 +335,8 @@ class ExchangeService:
                 logger.info("="*50)
                 logger.info("Initializing REST API connection (REST-only mode)...")
                 sys.stdout.flush()
-                self.client.load_markets()
+                with self.api_lock:
+                    self.client.load_markets()
                 logger.info("✅ REST API connected successfully")
                 sys.stdout.flush()
                 
@@ -356,7 +359,8 @@ class ExchangeService:
             logger.info("Initializing REST API connection...")
             sys.stdout.flush()
             
-            self.client.load_markets()
+            with self.api_lock:
+                self.client.load_markets()
             logger.info("✅ REST API connected successfully")
             sys.stdout.flush()
 
@@ -408,26 +412,72 @@ class ExchangeService:
     def fetch_initial_history(self, limit=100):
         if self.is_domestic:
             try:
-                ohlcv_5m = self._fetch_domestic_history('5', limit)
-                ohlcv_15m = self._fetch_domestic_history('15', limit)
-                ohlcv_1h = self._fetch_domestic_history('60', max(50, limit // 2))
-                return {'5m': ohlcv_5m, '15m': ohlcv_15m, '1h': ohlcv_1h}
+                def fetch_sina(scale, lim):
+                    try:
+                        return self._fetch_domestic_history(scale, lim)
+                    except Exception:
+                        return []
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                    f_5m = executor.submit(fetch_sina, '5', limit)
+                    f_15m = executor.submit(fetch_sina, '15', limit)
+                    f_1h = executor.submit(fetch_sina, '60', max(50, limit // 2))
+                    f_1d = executor.submit(fetch_sina, '240', 50)
+                    
+                    ohlcv_5m = f_5m.result()
+                    ohlcv_15m = f_15m.result()
+                    ohlcv_1h = f_1h.result()
+                    ohlcv_1d = f_1d.result()
+                return {'5m': ohlcv_5m, '15m': ohlcv_15m, '1h': ohlcv_1h, '1d': ohlcv_1d}
             except Exception as e:
                 logger.error(f"Domestic history fetch failed: {e}")
-                return {'5m': [], '15m': [], '1h': []}
+                return {'5m': [], '15m': [], '1h': [], '1d': []}
 
         """只在启动时调用一次 REST API 获取历史 K 线"""
+        # 创建独立的临时客户端以支持并行拉取，避免与轮询线程争抢 API 锁
+        conf = {
+            'enableRateLimit': True,
+            'timeout': Config.HTTP_TIMEOUT_MS,
+            'proxies': Config.exchange_proxies(),
+            'options': {'defaultType': 'future'}
+        }
+        if self.is_live:
+            conf.update({'apiKey': Config.API_KEY, 'secret': Config.API_SECRET})
+        
+        temp_client = ccxt.binance(conf)
+        if Config.BINANCE_REST_URL:
+            temp_client.urls['api']['fapi'] = Config.BINANCE_REST_URL
+
+        def fetch_one(tf, lim):
+            try:
+                return temp_client.fetch_ohlcv(self.symbol, tf, limit=lim)
+            except Exception as ex:
+                logger.error(f"[History Fetch One Error] {self.symbol} {tf}: {ex}")
+                return []
+
         try:
-            # 获取5分钟K线历史数据
-            ohlcv_5m = self.client.fetch_ohlcv(self.symbol, '5m', limit=limit)
-            # 获取15分钟K线历史数据
-            ohlcv_15m = self.client.fetch_ohlcv(self.symbol, '15m', limit=limit)
-            # 获取1小时K线历史数据（刻时模型）
-            ohlcv_1h = self.client.fetch_ohlcv(self.symbol, '1h', limit=max(50, limit // 2))
-            return {'5m': ohlcv_5m, '15m': ohlcv_15m, '1h': ohlcv_1h}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                f_5m = executor.submit(fetch_one, '5m', limit)
+                f_15m = executor.submit(fetch_one, '15m', limit)
+                f_1h = executor.submit(fetch_one, '1h', max(50, limit // 2))
+                f_1d = executor.submit(fetch_one, '1d', 50)
+                
+                ohlcv_5m = f_5m.result()
+                ohlcv_15m = f_15m.result()
+                ohlcv_1h = f_1h.result()
+                ohlcv_1d = f_1d.result()
+            
+            try:
+                temp_client.close()
+            except Exception:
+                pass
+            return {'5m': ohlcv_5m, '15m': ohlcv_15m, '1h': ohlcv_1h, '1d': ohlcv_1d}
         except Exception as e:
             logger.error(f"[History Fetch Error] {e}")
-            return {'5m': [], '15m': [], '1h': []}
+            try:
+                temp_client.close()
+            except Exception:
+                pass
+            return {'5m': [], '15m': [], '1h': [], '1d': []}
 
     def _fetch_domestic_history(self, scale, limit):
         url = f"https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData?symbol={self.symbol}&scale={scale}&ma=no&datalen={limit}"
@@ -475,18 +525,24 @@ class ExchangeService:
         if self.client is None:
             return
             
-        # 1. 获取最新价格
-        ticker = self.client.fetch_ticker(self.symbol)
-        curr_price = float(ticker['last'])
-        
-        # 2. 获取盘口 (OrderBook)
+        # 1. 获取最新价格与盘口
         try:
-            book_data = self.client.fetch_order_book(self.symbol, limit=5)
+            with self.api_lock:
+                ticker = self.client.fetch_ticker(self.symbol)
+                book_data = self.client.fetch_order_book(self.symbol, limit=5)
+            curr_price = float(ticker['last'])
             orderbook = {
                 'bids': [[float(p), float(v)] for p, v in book_data['bids']],
                 'asks': [[float(p), float(v)] for p, v in book_data['asks']]
             }
         except Exception:
+            # 兼容处理单项请求失败
+            try:
+                with self.api_lock:
+                    ticker = self.client.fetch_ticker(self.symbol)
+                curr_price = float(ticker['last'])
+            except Exception:
+                curr_price = 0.0
             orderbook = None
             
         # 3. 构造 5m, 15m, 1h 的最新单个蜡烛
@@ -547,7 +603,8 @@ class ExchangeService:
         if self.client is None:
             return amount
         try:
-            return float(self.client.amount_to_precision(self.symbol, amount))
+            with self.api_lock:
+                return float(self.client.amount_to_precision(self.symbol, amount))
         except Exception as e:
             logger.error(f"Precision Error: {e}")
             return amount
@@ -571,7 +628,8 @@ class ExchangeService:
             logger.info(f"[LIVE EXEC] {side.upper()} {amount} | Params: {params}")
 
             # create_market_order 是同步阻塞的，timeout 由 ccxt 配置控制
-            order = self.client.create_market_order(self.symbol, side, amount, params=params)
+            with self.api_lock:
+                order = self.client.create_market_order(self.symbol, side, amount, params=params)
 
             # 简单的成交确认
             if order and order.get('status') in ['closed', 'open']:
@@ -601,7 +659,8 @@ class ExchangeService:
             }
             
         try:
-            balance = self.client.fetch_balance()
+            with self.api_lock:
+                balance = self.client.fetch_balance()
             # 返回USDT余额和总权益
             usdt_balance = balance.get('USDT', {})
             return {
@@ -619,6 +678,7 @@ class ExchangeService:
         try:
             # 部分 CCXT 版本支持 close
             if self.client and hasattr(self.client, 'close'):
-                self.client.close()
+                with self.api_lock:
+                    self.client.close()
         except Exception:
             pass

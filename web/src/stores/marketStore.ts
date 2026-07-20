@@ -49,6 +49,7 @@ const defaultMarket: MarketData = {
   kline_5m: null,
   kline_15m: null,
   kline_1h: null,
+  kline_1d: null,
   orderbook: null,
   funding_rate: 0,
   btc_price: 0,

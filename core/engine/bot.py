@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 
+import pandas as pd
 import redis
 from colorama import init
 
@@ -74,6 +75,7 @@ class QuantBot:
         self.last_tick_price = 0.0
         self.last_btc_price = 0.0
         self.exchange_connected = False
+        self.bot_lock = threading.Lock()
 
     def _validate_runtime_config(self):
         # 初始 DASHBOARD 模式不要求 API Key；切换到 LIVE 时由 switch_mode 校验
@@ -87,18 +89,24 @@ class QuantBot:
 
     async def handle_control(self, request):
         """WebUI 控制命令路由（由 /api/control 调用）"""
-        action = request.action
-        if action == "switch_mode":
-            if not request.mode:
-                raise ValueError("switch_mode 需要 mode 参数")
-            return self.switch_mode(request.mode)
-        elif action == "exit":
-            self._exit_procedure()
-            return "Exiting..."
-        elif action in ("pause", "resume"):
-            return f"Action {action} acknowledged (no-op)"
-        else:
-            raise ValueError(f"Unknown action: {action}")
+        with self.bot_lock:
+            action = request.action
+            if action == "switch_mode":
+                if not request.mode:
+                    raise ValueError("switch_mode 需要 mode 参数")
+                return self.switch_mode(request.mode)
+            elif action == "switch_symbol":
+                if not request.symbol:
+                    raise ValueError("switch_symbol 需要 symbol 参数")
+                return self.switch_symbol(request.symbol)
+            elif action == "exit":
+                self._exit_procedure()
+                return "Exiting..."
+            elif action in ("pause", "resume"):
+                return f"Action {action} acknowledged (no-op)"
+            else:
+                raise ValueError(f"Unknown action: {action}")
+
 
     def switch_mode(self, target_mode_str):
         """切换交易模式（仅允许单向升级：DASHBOARD -> PAPER -> LIVE）
@@ -177,6 +185,50 @@ class QuantBot:
                 msg = f"切换模式异常: {exc}"
                 logger.exception("switch_mode failed")
                 raise ValueError(msg) from exc
+
+    def switch_symbol(self, target_symbol: str):
+        """切换交易/看盘标的 (支持 BTC, ETH, SOL 等)"""
+        symbol = target_symbol.upper()
+        if not symbol.endswith('/USDT') and '-' not in symbol and not symbol.lower().startswith(('sh', 'sz')):
+            symbol = f"{symbol}/USDT"
+
+        if symbol == self.exchange.symbol:
+            return f"Already on {symbol}"
+
+        logger.info(f"Switching trading/watching symbol to {symbol}...")
+        self.ui.log_msg(f"Switching symbol to {symbol}...", "info")
+
+        # 1. 修改 ExchangeService 的 symbol 属性
+        self.exchange.symbol = symbol
+        self.exchange.is_domestic = symbol.lower().startswith(('sh', 'sz'))
+        
+        # 2. 清理 brain 中的旧特征和历史缓存
+        self.brain.history_5m = pd.DataFrame(columns=self.brain.HISTORY_COLUMNS)
+        self.brain.history_15m = pd.DataFrame(columns=self.brain.HISTORY_COLUMNS)
+        self.brain.history_1h = pd.DataFrame(columns=self.brain.HISTORY_COLUMNS)
+        if hasattr(self.brain, 'history_1d'):
+            self.brain.history_1d = pd.DataFrame(columns=self.brain.HISTORY_COLUMNS)
+        self.brain.cached_analysis_data = None
+        self.last_btc_price = 0.0
+        self.last_tick_price = 0.0
+        self.last_tick_analysis = None
+        self.current_candle_timestamp = 0
+
+        # 3. 更新 Web 共享状态中的 symbol 属性
+        self.web_state.update_account(symbol=symbol)
+        
+        # 4. 重新进行 Warming up 获取新标的的历史 K 线
+        self._warmup_models()
+        
+        # 5. 立刻更新一次 REST 接口下的最新报价和深度缓存
+        if self.exchange.is_rest_only:
+            try:
+                self.exchange._update_rest_data()
+            except Exception as e:
+                logger.error(f"Error updating REST data after symbol switch: {e}")
+
+        self.ui.log_msg(f"✅ Symbol switched to {symbol}", "success")
+        return f"Successfully switched to {symbol}"
 
     def _init_redis(self):
         if not Config.ENABLE_MAIL_REPORT:
@@ -308,6 +360,7 @@ class QuantBot:
             candles_5m = data.get('5m', [])
             candles_15m = data.get('15m', [])
             candles_1h = data.get('1h', [])
+            candles_1d = data.get('1d', [])
 
             if not (candles_5m and candles_15m and candles_1h):
                 self.ui.log_msg("⚠️ Warmup Data Empty - Starting with minimal state", "warning")
@@ -316,12 +369,26 @@ class QuantBot:
             self._ingest_warmup_candles(candles_5m, '5m', step=20)
             self._ingest_warmup_candles(candles_15m, '15m', step=10)
             self._ingest_warmup_candles(candles_1h, '1h', step=5)
+            self._ingest_warmup_candles(candles_1d, '1d', step=1)
             self.current_candle_timestamp = candles_5m[-1][0]
             self.ui.log_msg("✅ Warmup Complete", "success")
 
             if Config.WEB_ENABLED:
                 history_list = self.brain.history_5m[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
-                self.web_state.update_market(kline_5m=history_list)
+                history_15m = self.brain.history_15m[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
+                history_1h = self.brain.history_1h[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
+                history_1d = self.brain.history_1d[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
+
+                self.web_state.update_market(
+                    kline_5m=history_list,
+                    kline_15m=history_15m,
+                    kline_1h=history_1h,
+                    kline_1d=history_1d
+                )
+
+            # 立即计算第一次初始分析结果并存入缓存，防止首个5m周期内指标显示 0.0
+            initial_book = self.exchange._cached_latest.get('orderbook') if hasattr(self.exchange, '_cached_latest') else None
+            self.last_tick_analysis = self.brain.analyze(initial_book)
         except Exception as exc:
             self.ui.log_msg(f"❌ Warmup Error: {exc}", "error")
             logger.exception("Warmup traceback")
@@ -338,7 +405,7 @@ class QuantBot:
                     f"⚠️ Warmup timeout ({self.WARMUP_TIMEOUT_SECONDS}s). Continuing with empty data...",
                     "warning",
                 )
-                return {'5m': [], '15m': [], '1h': []}
+                return {'5m': [], '15m': [], '1h': [], '1d': []}
 
     def _ingest_warmup_candles(self, candles, timeframe, step):
         self.ui.log_msg(f"Processing {len(candles)} {timeframe} candles...", "info")
@@ -348,55 +415,68 @@ class QuantBot:
                 self.ui.log_msg(f"  Processed {index}/{len(candles)} {timeframe} candles", "info")
 
     def _tick(self):
-        c_5m, c_15m, c_1h, book, fr, btc_price = self.exchange.get_latest_data()
-        if not c_5m:
-            return
+        with self.bot_lock:
+            c_5m, c_15m, c_1h, book, fr, btc_price = self.exchange.get_latest_data()
+            if not c_5m:
+                return
 
-        # 更新 Web 盘口五档挂单数据
-        if book and Config.WEB_ENABLED:
-            self.web_state.update_orderbook(book)
+            # 更新 Web 盘口五档挂单数据
+            if book and Config.WEB_ENABLED:
+                self.web_state.update_orderbook(book)
 
-        timestamp = c_5m[0]
-        curr_price = float(c_5m[4])
-        self.last_tick_price = curr_price
+            timestamp = c_5m[0]
+            curr_price = float(c_5m[4])
+            self.last_tick_price = curr_price
 
-        btc_chg = self._calculate_btc_change(btc_price)
+            btc_chg = self._calculate_btc_change(btc_price)
 
-        if self.trader.position['size'] != 0:
-            self.trader.tick(curr_price, fr, None, timestamp)
+            if self.trader.position['size'] != 0:
+                self.trader.tick(curr_price, fr, None, timestamp)
 
-        if self.current_candle_timestamp == 0:
+            if self.current_candle_timestamp == 0:
+                self.current_candle_timestamp = timestamp
+                self._ingest_realtime_candles(c_5m, c_15m, c_1h, btc_chg)
+                if Config.WEB_ENABLED:
+                    history_list = self.brain.history_5m[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
+                    history_15m = self.brain.history_15m[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
+                    history_1h = self.brain.history_1h[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
+                    self.web_state.update_market(
+                        kline_5m=history_list,
+                        kline_15m=history_15m,
+                        kline_1h=history_1h
+                    )
+                return
+
+            is_new_candle = timestamp > self.current_candle_timestamp
+            if not is_new_candle:
+                self._update_ui(curr_price, self.last_tick_analysis)
+                return
+
+            logger.info(f"[Candle Close] {self.current_candle_timestamp} -> {timestamp}")
             self.current_candle_timestamp = timestamp
             self._ingest_realtime_candles(c_5m, c_15m, c_1h, btc_chg)
             if Config.WEB_ENABLED:
                 history_list = self.brain.history_5m[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
-                self.web_state.update_market(kline_5m=history_list)
-            return
+                history_15m = self.brain.history_15m[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
+                history_1h = self.brain.history_1h[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
+                self.web_state.update_market(
+                    kline_5m=history_list,
+                    kline_15m=history_15m,
+                    kline_1h=history_1h
+                )
 
-        is_new_candle = timestamp > self.current_candle_timestamp
-        if not is_new_candle:
-            self._update_ui(curr_price, self.last_tick_analysis)
-            return
+            analysis = self.brain.analyze(book)
+            # 仅在非看盘模式下尝试开仓；持仓管理（上方）对遗留持仓仍生效
+            if (self.trading_mode != TradingMode.DASHBOARD
+                    and self.trader.position['size'] == 0
+                    and analysis):
+                self.trader.tick(curr_price, fr, analysis, timestamp)
 
-        logger.info(f"[Candle Close] {self.current_candle_timestamp} -> {timestamp}")
-        self.current_candle_timestamp = timestamp
-        self._ingest_realtime_candles(c_5m, c_15m, c_1h, btc_chg)
-        if Config.WEB_ENABLED:
-            history_list = self.brain.history_5m[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
-            self.web_state.update_market(kline_5m=history_list)
-
-        analysis = self.brain.analyze(book)
-        # 仅在非看盘模式下尝试开仓；持仓管理（上方）对遗留持仓仍生效
-        if (self.trading_mode != TradingMode.DASHBOARD
-                and self.trader.position['size'] == 0
-                and analysis):
-            self.trader.tick(curr_price, fr, analysis, timestamp)
-
-        self._update_ui(curr_price, analysis)
-        self.alert_manager.check_and_alert(self.brain.history_5m, analysis)
-        self._send_heartbeat(curr_price, analysis)
-        if analysis:
-            self.last_tick_analysis = analysis
+            self._update_ui(curr_price, analysis)
+            self.alert_manager.check_and_alert(self.brain.history_5m, analysis)
+            self._send_heartbeat(curr_price, analysis)
+            if analysis:
+                self.last_tick_analysis = analysis
 
     def _calculate_btc_change(self, btc_price):
         if self.last_btc_price == 0:

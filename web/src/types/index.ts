@@ -4,6 +4,7 @@ export interface MarketData {
   kline_5m: number[][] | null;
   kline_15m: number[][] | null;
   kline_1h: number[][] | null;
+  kline_1d: number[][] | null;
   orderbook: OrderBook | null;
   funding_rate: number;
   btc_price: number;

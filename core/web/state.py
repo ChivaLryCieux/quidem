@@ -24,6 +24,7 @@ class WebState:
                 'kline_5m': None,
                 'kline_15m': None,
                 'kline_1h': None,
+                'kline_1d': None,
                 'orderbook': None,
                 'funding_rate': 0.0,
                 'btc_price': 0.0,
