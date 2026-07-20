@@ -50,7 +50,7 @@ class WebState:
             },
             'account': {
                 'balance': 0.0,
-                'mode': 'Paper',
+                'mode': 'Dashboard',
                 'symbol': 'SOL/USDT',
             },
             'trades': [],

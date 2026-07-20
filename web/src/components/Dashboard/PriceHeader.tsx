@@ -26,7 +26,7 @@ export function PriceHeader() {
         <div className="text-2xl font-bold font-mono text-[var(--brand)]">
           ${account.balance.toFixed(2)}
         </div>
-        <div className="text-xs font-mono text-[var(--text-muted)] mt-1">{account.mode.toUpperCase()}</div>
+        <div className="text-xs font-mono text-[var(--text-muted)] mt-1">{account.symbol}</div>
       </div>
 
       {/* Unrealized PnL */}

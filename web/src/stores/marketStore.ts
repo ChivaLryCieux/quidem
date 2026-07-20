@@ -78,7 +78,7 @@ const defaultPosition: PositionInfo = {
 
 const defaultAccount: AccountInfo = {
   balance: 0,
-  mode: 'Paper',
+  mode: 'Dashboard',
   symbol: 'SOL/USDT',
 };
 

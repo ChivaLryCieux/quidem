@@ -104,7 +104,7 @@ class QuantBot:
         """切换交易模式（仅允许单向升级：DASHBOARD -> PAPER -> LIVE）
 
         切换到 LIVE 需校验 API Key；有持仓时禁止切换。
-        返回 (success: bool, message: str)
+        成功返回 message 字符串；失败抛 ValueError（由 server.py 的 except 捕获）。
         """
         target = parse_mode(target_mode_str)
 
@@ -115,13 +115,13 @@ class QuantBot:
             if not can_switch(current, target):
                 msg = f"不允许降级或同级切换: {current.value} -> {target.value}"
                 logger.warning(msg)
-                return False, msg
+                raise ValueError(msg)
 
             # 2. 无持仓校验
             if self.trader.position['size'] != 0:
                 msg = f"当前有持仓，禁止切换模式 (size={self.trader.position['size']})"
                 logger.warning(msg)
-                return False, msg
+                raise ValueError(msg)
 
             # 3. LIVE 模式校验 API Key
             if target == TradingMode.LIVE:
@@ -129,7 +129,7 @@ class QuantBot:
                 if issues:
                     msg = f"实盘模式校验失败: {'; '.join(issues)}"
                     logger.error(msg)
-                    return False, msg
+                    raise ValueError(msg)
 
             # 4. 重建 ExchangeService 并重连
             old_exchange = self.exchange
@@ -144,7 +144,7 @@ class QuantBot:
                     self.exchange = old_exchange
                     msg = f"切换失败: 交易所重连失败 ({err_msg})"
                     logger.error(msg)
-                    return False, msg
+                    raise ValueError(msg)
 
                 old_exchange.close()
 
@@ -158,20 +158,25 @@ class QuantBot:
                 self.web_state.set_trading_mode(target.value)
                 self.web_state.update_account(
                     balance=self.trader.balance,
-                    mode="Live" if self.is_live else "Paper" if target == TradingMode.PAPER else "Dashboard",
+                    mode=target.value.capitalize(),
                     symbol=Config.SYMBOL,
                 )
 
                 self.ui.log_msg(f"✅ 已切换到 {target.label} 模式", "success")
                 logger.info(f"Trading mode switched: {current.value} -> {target.value}")
-                return True, f"已切换到 {target.label} 模式"
+                return f"已切换到 {target.label} 模式"
+            except ValueError:
+                # 校验类错误，直接向上抛
+                self.exchange = old_exchange
+                self.trader.exchange = old_exchange
+                raise
             except Exception as exc:
                 # 异常回滚
                 self.exchange = old_exchange
                 self.trader.exchange = old_exchange
                 msg = f"切换模式异常: {exc}"
                 logger.exception("switch_mode failed")
-                return False, msg
+                raise ValueError(msg) from exc
 
     def _init_redis(self):
         if not Config.ENABLE_MAIL_REPORT:
@@ -269,7 +274,7 @@ class QuantBot:
             # 初始化 Web 状态
             self.web_state.update_account(
                 balance=self.trader.balance,
-                mode="Dashboard",
+                mode=self.trading_mode.value.capitalize(),
                 symbol=Config.SYMBOL,
             )
             self.web_state.set_status("initializing")
