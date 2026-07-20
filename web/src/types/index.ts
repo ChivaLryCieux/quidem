@@ -1,9 +1,9 @@
 // 市场数据
 export interface MarketData {
   price: number;
-  kline_5m: number[] | null;
-  kline_15m: number[] | null;
-  kline_1h: number[] | null;
+  kline_5m: number[][] | null;
+  kline_15m: number[][] | null;
+  kline_1h: number[][] | null;
   orderbook: OrderBook | null;
   funding_rate: number;
   btc_price: number;

@@ -3,8 +3,10 @@ import logging
 import sys
 import threading
 import time
+from datetime import datetime, timezone, timedelta
 
 import ccxt
+import requests
 import websocket
 from .settings import Config
 from colorama import Fore, Style
@@ -20,8 +22,14 @@ class MarketDataStreamer(threading.Thread):
 
         # Binance Stream 名称必须小写，强制转换防止配置错误
         symbol_lower = Config.SYMBOL_WS.lower()
+        
+        # 提取基础 WS 域名并拼接 streams 参数
+        base_ws_url = Config.BINANCE_WS_URL
+        if "?" in base_ws_url:
+            base_ws_url = base_ws_url.split("?")[0]
+
         self.url = (
-            f"wss://fstream.binance.com/stream?streams="
+            f"{base_ws_url}?streams="
             f"{symbol_lower}@kline_5m/"
             f"{symbol_lower}@kline_15m/"
             f"{symbol_lower}@kline_1h/"
@@ -155,10 +163,116 @@ class MarketDataStreamer(threading.Thread):
             return self.data.copy()
 
 
+class DomesticDataStreamer(threading.Thread):
+    def __init__(self, symbol):
+        super().__init__()
+        self.daemon = True
+        self.symbol = symbol.lower()
+        self.lock = threading.Lock()
+        self.running = True
+        self.data = {
+            'kline_5m': None,
+            'kline_15m': None,
+            'kline_1h': None,
+            'orderbook': None,
+            'funding_rate': 0.0,
+            'btc_price': 0.0,
+            'is_ready': False
+        }
+
+    def run(self):
+        logger.info(f"Starting DomesticDataStreamer for {self.symbol}...")
+        headers = {"Referer": "https://finance.sina.com.cn/"}
+        url = f"http://hq.sinajs.cn/list={self.symbol}"
+        
+        while self.running:
+            try:
+                resp = requests.get(url, headers=headers, timeout=5)
+                if resp.status_code == 200:
+                    text = resp.content.decode('gbk')
+                    if '"' in text:
+                        data_str = text.split('"')[1]
+                        if data_str.strip():
+                            parts = data_str.split(',')
+                            if len(parts) >= 32:
+                                curr_price = float(parts[3])
+                                open_price = float(parts[1]) if float(parts[1]) > 0 else curr_price
+                                high_price = float(parts[4]) if float(parts[4]) > 0 else curr_price
+                                low_price = float(parts[5]) if float(parts[5]) > 0 else curr_price
+                                volume = float(parts[8])
+                                date_str = parts[30]
+                                time_str = parts[31]
+                                
+                                tz_bj = timezone(timedelta(hours=8))
+                                dt_str = f"{date_str} {time_str}"
+                                try:
+                                    dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=tz_bj)
+                                except ValueError:
+                                    dt = datetime.now(tz_bj)
+                                    
+                                timestamp_ms = int(dt.timestamp() * 1000)
+                                
+                                bids = []
+                                asks = []
+                                for i in range(5):
+                                    vol_idx = 10 + i * 2
+                                    prc_idx = 11 + i * 2
+                                    if float(parts[prc_idx]) > 0:
+                                        bids.append([float(parts[prc_idx]), float(parts[vol_idx]) / 100.0])
+                                for i in range(5):
+                                    vol_idx = 20 + i * 2
+                                    prc_idx = 21 + i * 2
+                                    if float(parts[prc_idx]) > 0:
+                                        asks.append([float(parts[prc_idx]), float(parts[vol_idx]) / 100.0])
+                                        
+                                orderbook = {
+                                    "bids": bids,
+                                    "asks": asks
+                                }
+                                
+                                def get_kline_candle(tf_sec):
+                                    candle_ts_ms = (timestamp_ms // (tf_sec * 1000)) * (tf_sec * 1000)
+                                    return [
+                                        candle_ts_ms,
+                                        open_price,
+                                        high_price,
+                                        low_price,
+                                        curr_price,
+                                        volume,
+                                        volume * 0.5
+                                    ]
+                                    
+                                with self.lock:
+                                    self.data['orderbook'] = orderbook
+                                    self.data['kline_5m'] = get_kline_candle(300)
+                                    self.data['kline_15m'] = get_kline_candle(900)
+                                    self.data['kline_1h'] = get_kline_candle(3600)
+                                    self.data['is_ready'] = True
+            except Exception as e:
+                logger.error(f"Domestic polling error: {e}")
+            time.sleep(2.0)
+
+    def stop(self):
+        self.running = False
+
+    def get_latest(self):
+        with self.lock:
+            return self.data.copy()
+
+
 class ExchangeService:
     def __init__(self, is_live=False):
         self.is_live = is_live
         self.paper_orders = []
+        self.symbol = Config.SYMBOL
+        self.is_domestic = self.symbol.lower().startswith(('sh', 'sz'))
+        self.is_rest_only = Config.BINANCE_REST_ONLY
+
+        if self.is_domestic:
+            logger.info(f"Initialized domestic ExchangeService for A-shares: {self.symbol}")
+            self.client = None
+            self.ws_streamer = DomesticDataStreamer(self.symbol)
+            return
 
         # 增加 timeout 防止网络卡死
         conf = {
@@ -177,10 +291,66 @@ class ExchangeService:
             conf.update({'apiKey': Config.API_KEY, 'secret': Config.API_SECRET})
 
         self.client = ccxt.binance(conf)
-        self.symbol = Config.SYMBOL
-        self.ws_streamer = MarketDataStreamer()
+        # 覆盖 CCXT 终结点以支持直连镜像
+        if Config.BINANCE_REST_URL:
+            self.client.urls['api']['fapi'] = Config.BINANCE_REST_URL
+            
+        if self.is_rest_only:
+            logger.info("REST-only mode enabled for Binance. WS connections will be disabled.")
+            self.ws_streamer = None
+            self._cached_latest = {
+                'kline_5m': None,
+                'kline_15m': None,
+                'kline_1h': None,
+                'orderbook': None,
+                'funding_rate': 0.0,
+                'btc_price': 0.0,
+                'is_ready': False
+            }
+            # 开启后台轮询线程
+            self.polling_thread = threading.Thread(target=self._poll_rest_data, daemon=True)
+        else:
+            self.ws_streamer = MarketDataStreamer()
 
     def connect(self):
+        if self.is_domestic:
+            try:
+                logger.info(f"Connecting to domestic data feeds for {self.symbol}...")
+                self.ws_streamer.start()
+                start_time = time.time()
+                while time.time() - start_time < 10:
+                    if self.ws_streamer.get_latest().get('is_ready'):
+                        logger.info("✅ Domestic data feed ready")
+                        return True, "Domestic Feed Ready"
+                    time.sleep(0.5)
+                return True, "Domestic Feed Started (timeout waiting for first tick)"
+            except Exception as e:
+                logger.error(f"❌ Domestic connection failed: {e}")
+                return False, f"Domestic connection failed: {e}"
+
+        if self.is_rest_only:
+            try:
+                logger.info("="*50)
+                logger.info("Initializing REST API connection (REST-only mode)...")
+                sys.stdout.flush()
+                self.client.load_markets()
+                logger.info("✅ REST API connected successfully")
+                sys.stdout.flush()
+                
+                # 初始化缓存数据
+                self._update_rest_data()
+                
+                # 启动后台轮询线程
+                self.polling_thread.start()
+                logger.info("✅ REST polling thread started")
+                logger.info("="*50)
+                sys.stdout.flush()
+                return True, "Connected & REST Polling Started"
+            except Exception as e:
+                logger.error(f"❌ Connection Failed: {str(e)}")
+                sys.stdout.flush()
+                return False, f"Connection Failed: {str(e)}"
+
         try:
             logger.info("="*50)
             logger.info("Initializing REST API connection...")
@@ -231,8 +401,21 @@ class ExchangeService:
             logger.error(traceback.format_exc())
             sys.stdout.flush()
             return False, f"Connection Failed: {str(e)}"
+            logger.error(traceback.format_exc())
+            sys.stdout.flush()
+            return False, f"Connection Failed: {str(e)}"
 
     def fetch_initial_history(self, limit=100):
+        if self.is_domestic:
+            try:
+                ohlcv_5m = self._fetch_domestic_history('5', limit)
+                ohlcv_15m = self._fetch_domestic_history('15', limit)
+                ohlcv_1h = self._fetch_domestic_history('60', max(50, limit // 2))
+                return {'5m': ohlcv_5m, '15m': ohlcv_15m, '1h': ohlcv_1h}
+            except Exception as e:
+                logger.error(f"Domestic history fetch failed: {e}")
+                return {'5m': [], '15m': [], '1h': []}
+
         """只在启动时调用一次 REST API 获取历史 K 线"""
         try:
             # 获取5分钟K线历史数据
@@ -246,12 +429,108 @@ class ExchangeService:
             logger.error(f"[History Fetch Error] {e}")
             return {'5m': [], '15m': [], '1h': []}
 
+    def _fetch_domestic_history(self, scale, limit):
+        url = f"https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData?symbol={self.symbol}&scale={scale}&ma=no&datalen={limit}"
+        headers = {"Referer": "https://finance.sina.com.cn/"}
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+        if not isinstance(data, list):
+            return []
+            
+        tz_bj = timezone(timedelta(hours=8))
+        ohlcv = []
+        for item in data:
+            dt_str = item['day']
+            try:
+                if len(dt_str) == 10:
+                    dt = datetime.strptime(dt_str, "%Y-%m-%d").replace(tzinfo=tz_bj)
+                else:
+                    dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=tz_bj)
+            except ValueError:
+                continue
+                
+            ts = int(dt.timestamp() * 1000)
+            ohlcv.append([
+                ts,
+                float(item['open']),
+                float(item['high']),
+                float(item['low']),
+                float(item['close']),
+                float(item['volume'])
+            ])
+        return ohlcv
+
+    def _poll_rest_data(self):
+        logger.info("Starting REST-only polling loop...")
+        while True:
+            try:
+                self._update_rest_data()
+            except Exception as e:
+                logger.error(f"REST Polling error: {e}")
+            time.sleep(5.0)
+
+    def _update_rest_data(self):
+        if self.client is None:
+            return
+            
+        # 1. 获取最新价格
+        ticker = self.client.fetch_ticker(self.symbol)
+        curr_price = float(ticker['last'])
+        
+        # 2. 获取盘口 (OrderBook)
+        try:
+            book_data = self.client.fetch_order_book(self.symbol, limit=5)
+            orderbook = {
+                'bids': [[float(p), float(v)] for p, v in book_data['bids']],
+                'asks': [[float(p), float(v)] for p, v in book_data['asks']]
+            }
+        except Exception:
+            orderbook = None
+            
+        # 3. 构造 5m, 15m, 1h 的最新单个蜡烛
+        timestamp_ms = int(time.time() * 1000)
+        def get_kline_candle(tf_sec):
+            candle_ts_ms = (timestamp_ms // (tf_sec * 1000)) * (tf_sec * 1000)
+            return [
+                candle_ts_ms,
+                curr_price, # open
+                curr_price, # high
+                curr_price, # low
+                curr_price, # close
+                float(ticker.get('baseVolume', 0.0) or 0.0),
+                float(ticker.get('baseVolume', 0.0) or 0.0) * 0.5
+            ]
+            
+        funding_rate = 0.0
+        if 'info' in ticker and ticker['info']:
+            try:
+                funding_rate = float(ticker['info'].get('lastFundingRate', 0.0))
+            except (ValueError, TypeError):
+                pass
+
+        self._cached_latest.update({
+            'kline_5m': get_kline_candle(300),
+            'kline_15m': get_kline_candle(900),
+            'kline_1h': get_kline_candle(3600),
+            'orderbook': orderbook,
+            'funding_rate': funding_rate,
+            'btc_price': curr_price if self.symbol.startswith('BTC') else 0.0,
+            'is_ready': True
+        })
+
     def get_latest_data(self):
         """
-        从 WebSocket 本地缓存读取数据
+        从 WebSocket 本地缓存或 REST 缓存读取数据
         返回: (最新5m K线列表, 最新15m K线列表, 最新1h K线列表, 订单簿, 资金费率, BTC价格)
         """
-        data = self.ws_streamer.get_latest()
+        if self.is_domestic:
+            data = self.ws_streamer.get_latest()
+        elif self.is_rest_only:
+            data = self._cached_latest.copy()
+        else:
+            data = self.ws_streamer.get_latest()
 
         # 使用 .get 安全获取，防止初始化时的 KeyError
         kline_5m = data.get('kline_5m')
@@ -265,6 +544,8 @@ class ExchangeService:
 
     def get_precision_amount(self, amount, price):
         """将数量转换为交易所规定的精度"""
+        if self.client is None:
+            return amount
         try:
             return float(self.client.amount_to_precision(self.symbol, amount))
         except Exception as e:
@@ -311,8 +592,8 @@ class ExchangeService:
 
     def fetch_balance(self):
         """获取账户余额信息"""
-        if not self.is_live:
-            # 模拟盘返回默认余额100 USDT
+        if not self.is_live or self.client is None:
+            # 模拟盘或国内直连返回默认余额
             return {
                 'free': Config.PAPER_BALANCE,
                 'used': 0.0,
@@ -333,10 +614,11 @@ class ExchangeService:
             return None
 
     def close(self):
-        self.ws_streamer.stop()
+        if self.ws_streamer:
+            self.ws_streamer.stop()
         try:
             # 部分 CCXT 版本支持 close
-            if hasattr(self.client, 'close'):
+            if self.client and hasattr(self.client, 'close'):
                 self.client.close()
-        except:
+        except Exception:
             pass

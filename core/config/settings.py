@@ -60,6 +60,11 @@ class Config:
     WS_READY_TIMEOUT_SEC = _env_int("WS_READY_TIMEOUT_SEC", 30)
     WS_RECONNECT_DELAY_SEC = _env_float("WS_RECONNECT_DELAY_SEC", 3.0)
 
+    # 镜像和域名配置（用于大陆直连免代理备选方案）
+    BINANCE_REST_URL = os.getenv("BINANCE_REST_URL", "https://fapi.binance.com")
+    BINANCE_WS_URL = os.getenv("BINANCE_WS_URL", "wss://fstream.binance.com/stream")
+    BINANCE_REST_ONLY = _env_bool("BINANCE_REST_ONLY", False)
+
     # 交易所 API
     API_KEY = os.getenv("BINANCE_API_KEY")
     API_SECRET = os.getenv("BINANCE_SECRET")

@@ -82,6 +82,9 @@ class SystemStatus(BaseModel):
     uptime: int = 0
     start_time: float = 0.0
     ws_connected: bool = False
+    exchange_connected: bool = False
+    error_message: str = ''
+    trading_mode: str = 'dashboard'
 
 
 class SnapshotResponse(BaseModel):

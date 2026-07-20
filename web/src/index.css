@@ -1,30 +1,26 @@
 @import "tailwindcss";
 
-/* ==========================================
-   Light 扁平极简主题（品牌红 + 白底）
-   ========================================== */
-
 :root {
-  /* 背景层 */
-  --bg-page: #f5f5f7;
+  /* Page background & cards */
+  --bg-page: #f8fafc;
   --bg-card: #ffffff;
-  --bg-subtle: #f9fafb;
+  --bg-subtle: #f1f5f9;
 
-  /* 文字层 */
-  --text-primary: #1a1a1a;
-  --text-secondary: #666666;
-  --text-muted: #9ca3af;
+  /* Typography color scale */
+  --text-primary: #0f172a;    /* slate-900 */
+  --text-secondary: #475569;  /* slate-600 */
+  --text-muted: #94a3b8;      /* slate-400 */
 
-  /* 品牌与语义色 */
-  --brand: #e63946;
-  --green: #16a34a;
-  --red: #dc2626;
+  /* Brand / Tech accents */
+  --brand: #e11d48;           /* rose-600 (tech-crimson) */
+  --green: #10b981;           /* emerald-500 */
+  --red: #f43f5e;             /* rose-500 */
 
-  /* 边框 */
-  --border: #e5e7eb;
-  --border-strong: #d1d5db;
+  /* Borders */
+  --border: #e2e8f0;          /* slate-200 */
+  --border-strong: #cbd5e1;   /* slate-300 */
 
-  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
@@ -53,33 +49,50 @@ body {
   min-height: 100vh;
 }
 
-/* ==========================================
-   扁平卡片工具类
-   ========================================== */
-
-/* 标准卡片：白底 + 1px 边框 + 圆角 */
+/* Premium Card Style: Flat, very clean border, subtle shadow */
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02), 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* 品牌红强调卡片：顶部品牌色细条 */
+.card:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  border-color: var(--border-strong);
+}
+
+/* Red accent card */
 .card-red-accent {
   position: relative;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-top: 2px solid var(--brand);
-  border-radius: 6px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
-/* ==========================================
-   自定义滚动条（浅色）
-   ========================================== */
+.card-red-accent::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--brand);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
 
+/* Monospace fonts for numbers and code elements */
+.font-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace !important;
+}
+
+/* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -88,35 +101,24 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--brand);
 }
 
-/* ==========================================
-   动画效果
-   ========================================== */
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-.animate-pulse-dot {
-  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-/* ==========================================
-   状态指示器（连接=绿 / 断开=灰红）
-   ========================================== */
-
+/* Status Indicator Dot */
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   position: relative;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.6; }
 }
 
 .status-dot::after {
@@ -128,8 +130,8 @@ body {
   bottom: -2px;
   border-radius: 50%;
   background: inherit;
-  opacity: 0.3;
-  animation: pulse 2s infinite;
+  opacity: 0.4;
+  animation: pulse 2s infinite ease-in-out;
 }
 
 .status-connected {
@@ -138,19 +140,23 @@ body {
 
 .status-disconnected {
   background: var(--red);
-  opacity: 0.5;
 }
 
-/* ==========================================
-   数据闪烁效果（浅红高亮）
-   ========================================== */
-
+/* Flash alert animation for updates */
 @keyframes flash-update {
   0% { background-color: transparent; }
-  50% { background-color: rgba(230, 57, 70, 0.08); }
+  30% { background-color: rgba(225, 29, 72, 0.06); }
   100% { background-color: transparent; }
 }
 
 .flash-update {
-  animation: flash-update 0.3s ease-out;
+  animation: flash-update 0.4s ease-out;
+}
+
+/* Premium micro-borders for table headers */
+table th {
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border);
 }

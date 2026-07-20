@@ -318,6 +318,10 @@ class QuantBot:
             self._ingest_warmup_candles(candles_1h, '1h', step=5)
             self.current_candle_timestamp = candles_5m[-1][0]
             self.ui.log_msg("✅ Warmup Complete", "success")
+
+            if Config.WEB_ENABLED:
+                history_list = self.brain.history_5m[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
+                self.web_state.update_market(kline_5m=history_list)
         except Exception as exc:
             self.ui.log_msg(f"❌ Warmup Error: {exc}", "error")
             logger.exception("Warmup traceback")
@@ -360,6 +364,9 @@ class QuantBot:
         if self.current_candle_timestamp == 0:
             self.current_candle_timestamp = timestamp
             self._ingest_realtime_candles(c_5m, c_15m, c_1h, btc_chg)
+            if Config.WEB_ENABLED:
+                history_list = self.brain.history_5m[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
+                self.web_state.update_market(kline_5m=history_list)
             return
 
         is_new_candle = timestamp > self.current_candle_timestamp
@@ -370,6 +377,9 @@ class QuantBot:
         logger.info(f"[Candle Close] {self.current_candle_timestamp} -> {timestamp}")
         self.current_candle_timestamp = timestamp
         self._ingest_realtime_candles(c_5m, c_15m, c_1h, btc_chg)
+        if Config.WEB_ENABLED:
+            history_list = self.brain.history_5m[['timestamp', 'open', 'high', 'low', 'close', 'volume']].values.tolist()
+            self.web_state.update_market(kline_5m=history_list)
 
         analysis = self.brain.analyze(book) if book else None
         # 仅在非看盘模式下尝试开仓；持仓管理（上方）对遗留持仓仍生效
@@ -404,6 +414,9 @@ class QuantBot:
         pos = self.trader.position
         unrealized = (price - pos['entry_price']) * pos['size'] if pos['size'] != 0 else 0
 
+        # 更新 Web 状态 (无论是否有策略分析结果，价格和余额都需要实时更新)
+        self._update_web_state(price, analysis, unrealized)
+
         if not analysis:
             return
 
@@ -418,9 +431,6 @@ class QuantBot:
             reversal=analysis.get('reversal_factor', 0.0),
         )
 
-        # 更新 Web 状态
-        self._update_web_state(price, analysis, unrealized)
-
     def _update_web_state(self, price, analysis, unrealized_pnl):
         """更新 Web 共享状态"""
         if not Config.WEB_ENABLED:
@@ -429,14 +439,17 @@ class QuantBot:
         # 更新价格
         self.web_state.update_price(price)
 
+        # 确保 analysis 至少是个字典，防止 None.get() 报错
+        analysis_data = analysis or {}
+
         # 更新策略状态
         self.web_state.update_strategy(
             state=self.brain.state,
             color=self.brain.color,
-            adx=analysis.get('adx', 0.0),
-            macd=analysis.get('macd_histogram', 0.0),
-            reversal=analysis.get('reversal_factor', 0.0),
-            supertrend_5m=analysis.get('supertrend_direction', 0),
+            adx=analysis_data.get('adx', 0.0),
+            macd=analysis_data.get('macd_histogram', 0.0),
+            reversal=analysis_data.get('reversal_factor', 0.0),
+            supertrend_5m=analysis_data.get('supertrend_direction', 0),
             supertrend_15m=self.brain.signal_engine.supertrend_15m_direction,
             supertrend_1h=self.brain.signal_engine.supertrend_1h_direction,
         )
