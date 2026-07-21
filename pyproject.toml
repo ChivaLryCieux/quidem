@@ -17,7 +17,7 @@ dependencies = [
     "hmmlearn==0.3.3",
     "joblib==1.4.2",
     "matplotlib",
-    "numpy",
+    "numpy<2",
     "pandas==2.0.3",
     "pydantic==2.5.3",
     "python-dotenv==1.2.1",
@@ -40,7 +40,7 @@ dev = []
 quidem-bot = "run:main"
 
 [tool.setuptools]
-packages = ["core", "core.config", "core.engine", "core.analysis", "core.strategy", "core.risk", "core.ui", "core.utils", "core.web", "backtest"]
+packages = ["core", "core.config", "core.engine", "core.analysis", "core.strategy", "core.risk", "core.ui", "core.utils", "core.web"]
 
 [tool.setuptools.package-data]
 core = ["*.yaml", "*.yml", "*.json"]
